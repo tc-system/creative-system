@@ -57,7 +57,8 @@ const TASK_CODE = [
   { id: 'stampa',      label: 'Stampa',            color: '#16a34a' },
   { id: 'lavorazione', label: 'Altre lavorazioni', color: '#334155' },
 ];
-// Le code del Centro di controllo (deciso da Riccardo il 2026-11-19):
+// Le code del Centro di controllo (deciso da Riccardo il 2026-11-19; BOZZE in testa dal 2026-11-23):
+//   BOZZE: ordini in lavorazione senza il PDF «<numero> bozza.pdf» sul NAS (task dal Mac mini, sql/bozze-pdf-task.sql)
 //   DTF-FILE: ordini della lista DTF senza file caricati + proposte DTF da approvare
 //   DTF-STAMPA: la coda di stampa di DTF interno con solo ciò che ha i file (conto terzi, cartelle, ordini)
 //               + "Cartella senza ordine" e "Controllare se stampato"
@@ -65,6 +66,7 @@ const TASK_CODE = [
 //   ALTRE LAVORAZIONI: tutto il resto che non riguarda i negozi online
 //   NEGOZI: tutto quello dei negozi online (produzione Shopify, mail, indirizzi, giacenze), filtrabile per negozio
 const TASK_CODE_Q = [
+  { id: 'bozze',     label: 'BOZZE',             color: '#f59e0b', hint: 'Ordini in lavorazione senza la bozza in PDF sul NAS' },
   { id: 'dtffile',   label: 'DTF-FILE',          color: '#a855f7', hint: 'Ordini con DTF senza file nella cartella 1. Stampare, e proposte da approvare' },
   { id: 'dtfstampa', label: 'DTF-STAMPA',        color: '#0ea5e9', hint: 'Coda di stampa al macchinario, nello stesso ordine di DTF interno' },
   { id: 'stampa',    label: 'STAMPA',            color: '#16a34a', hint: 'DTF stampati e merce pronta: si applica' },
@@ -72,11 +74,12 @@ const TASK_CODE_Q = [
   { id: 'negozi',    label: 'NEGOZI',            color: '#ec4899', hint: 'Ordini, mail e spedizioni dei negozi online' },
 ];
 const TASK_CODE_VECCHIE = { file: 'dtffile', dtf: 'dtfstampa', lavorazione: 'altre' };
-const codaAttiva = () => { const c = TASK_CODE_VECCHIE[Ctrl.coda] || Ctrl.coda; return TASK_CODE_Q.some(x => x.id === c) ? c : 'dtffile'; };
+const codaAttiva = () => { const c = TASK_CODE_VECCHIE[Ctrl.coda] || Ctrl.coda; return TASK_CODE_Q.some(x => x.id === c) ? c : TASK_CODE_Q[0].id; };
 // Task dei negozi online: arrivano da Shopify o hanno come brand un negozio (o Live Printing)
 const taskNegozio = (t) => t.fonte === 'shopify' || t.fonte === 'shopify_admin' || TASK_BRAND.some(m => m.id === t.macroarea);
 // Coda di un task. null = non si mostra ("Stampa DTF" della linea produttiva: c'è già l'ordine in DTF-STAMPA)
 function taskCoda(t) {
+  if (t.fonte === 'automazione' && t.fonte_rif?.bozze) return 'bozze';
   if (t.fonte === 'automazione' && t.fonte_rif?.dtf) return /^(proposta|tif|nome):/.test(String(t.fonte_rif.dtf)) ? 'dtffile' : 'dtfstampa';
   const c = taskCat(t);
   if (c === 'dtf') return null;
@@ -291,7 +294,7 @@ const Ctrl = {
   viewCtrl: 'cervello',  // ultima scheda aperta nel Centro di controllo
   giorno: ctrlOggi(),    // giorno mostrato
   macroarea: null,       // filtro per brand dei task di una persona (null = tutti)
-  coda: 'file',          // coda comune: file, dtf, stampa, lavorazione o un brand
+  coda: 'bozze',         // coda comune: bozze, dtffile, dtfstampa, stampa, altre, negozi
   tasks: [],             // task del giorno + arretrati aperti dei giorni prima
   tipi: [],
   users: [],             // nickname dello staff
@@ -1427,7 +1430,11 @@ function renderTaskQueue(coda, emptyText = '') {
   const ordinati = sortTasks;
   const sub = (titolo, html) => `<div class="ctrl-sub">${titolo}</div><div class="task-list task-stack">${html}</div>`;
   let corpo, n;
-  if (cat === 'dtffile') {
+  if (cat === 'bozze') {
+    n = list.length;
+    corpo = list.length ? `<div class="task-list task-stack">${ordinati(list).map(renderBozzaTaskRiga).join('')}</div>`
+                        : '<div class="empty-list">Tutti gli ordini in lavorazione hanno la bozza.</div>';
+  } else if (cat === 'dtffile') {
     n = list.length + righe.file.length;
     // Tre categorie, sempre in quest'ordine, come pulsanti in alto: 1 caricare (proposte + ordini senza DTF), 2 creare i TIF, 3 rinominare
     const di = (pref) => list.filter(t => String(t.fonte_rif?.dtf || '').startsWith(pref + ':'));
@@ -1470,7 +1477,7 @@ function renderTaskQueue(coda, emptyText = '') {
       <div class="page-card-head"><h2>${escapeHtml(info.label)}</h2><span class="table-count">${n}</span>
         <span class="ctrl-group-hint">${escapeHtml(info.hint)}</span></div>
       ${taskCodaBar(coda, righe)}
-      ${list.length && !['dtffile', 'dtfstampa'].includes(cat) ? taskAutoNote(list) : ''}
+      ${list.length && !['bozze', 'dtffile', 'dtfstampa'].includes(cat) ? taskAutoNote(list) : ''}
       <div class="tk-split-list ${CtrlAnim.filtro ? 'ctrl-fade' : ''}">${corpo}</div>
     </section>`;
 }
@@ -1599,6 +1606,29 @@ async function dtfTiffGenera(nome) {
     showToast(DtfCartella.server() ? 'Il Mac mini crea i TIF entro un paio di minuti: poi il task ti ricorda di salvarli sul NAS' : 'Richiesta salvata: i TIF arrivano quando il Mac mini è attivo', DtfCartella.server() ? 'success' : 'error');
   } catch (e) { console.error('[dtf tiff]', e); showToast('Richiesta non salvata: riprova', 'error'); }
   refreshControlPage();
+}
+
+// Task "Fare la bozza": dove salvare il PDF sul NAS e con che nome; si chiude da solo quando il Mac mini lo trova
+function renderBozzaTaskRiga(t) {
+  const id = String(t.fonte_rif?.bozze || ''), percorso = t.fonte_rif?.percorso || '';
+  const o = typeof TCFactory !== 'undefined' ? TCFactory.getOrderById(id) : null;
+  const nome = `${id} bozza.pdf`, pr = taskPrio(t.priorita === 'urgente' ? 'urgente' : 'normale');
+  const dl = o ? TCFactory.getEffectiveDeadline(o) : null;
+  return `
+    <article class="task-row is-task">
+      <i class="task-prio" style="--p:${pr.color};" role="img" title="Priorità ${pr.label.toLowerCase()}" aria-label="Priorità ${pr.label.toLowerCase()}"></i>
+      <button type="button" class="task-main" onclick="SchedaOrdine.apri('${escapeHtml(id)}')">
+        <span class="task-title">${escapeHtml(t.titolo)}</span>
+        <span class="task-meta">Salva <strong>${escapeHtml(nome)}</strong> ${percorso ? `in <strong>${escapeHtml(dtfNasTesto({ percorso }))}</strong>` : 'nella cartella del cliente, anno corrente'}${dl ? ` · scadenza ordine ${TCFactory.formatDate(dl.date)}` : ''}</span>
+      </button>
+      <div class="task-badges"></div>
+      <span class="task-time"></span>
+      <div class="task-actions">
+        ${percorso ? `<button type="button" class="ctrl-btn" onclick="dtfNasCopia(${escapeHtml(JSON.stringify(percorso))})" title="Copia il percorso della cartella sul NAS">Copia percorso</button>` : ''}
+        <button type="button" class="ctrl-btn" onclick="ctrlCopia(${escapeHtml(JSON.stringify(nome))}, 'Nome copiato: usalo per salvare il PDF')" title="Copia il nome del file">Copia nome</button>
+        <button type="button" class="ctrl-btn" onclick="SchedaOrdine.apri('${escapeHtml(id)}')">Apri ordine</button>
+      </div>
+    </article>`;
 }
 
 function renderDtfTaskRiga(t) {
