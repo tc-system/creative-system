@@ -58,7 +58,7 @@ const TASK_CODE = [
   { id: 'lavorazione', label: 'Altre lavorazioni', color: '#334155' },
 ];
 // Le code del Centro di controllo (deciso da Riccardo il 2026-11-19; BOZZE in testa dal 2026-11-23):
-//   BOZZE: ordini in lavorazione senza il PDF «<numero> bozza.pdf» sul NAS (task dal Mac mini, sql/bozze-pdf-task.sql)
+//   BOZZE: ordini in lavorazione senza il PDF «<nome ordine> bozza.pdf» sul NAS (task dal Mac mini, sql/bozze-pdf-task.sql)
 //   DTF-FILE: ordini della lista DTF senza file caricati + proposte DTF da approvare
 //   DTF-STAMPA: la coda di stampa di DTF interno con solo ciò che ha i file (conto terzi, cartelle, ordini)
 //               + "Cartella senza ordine" e "Controllare se stampato"
@@ -1612,7 +1612,7 @@ async function dtfTiffGenera(nome) {
 function renderBozzaTaskRiga(t) {
   const id = String(t.fonte_rif?.bozze || ''), percorso = t.fonte_rif?.percorso || '';
   const o = typeof TCFactory !== 'undefined' ? TCFactory.getOrderById(id) : null;
-  const nome = `${id} bozza.pdf`, pr = taskPrio(t.priorita === 'urgente' ? 'urgente' : 'normale');
+  const nome = t.fonte_rif?.nome_file || `${o?.nome || id} bozza.pdf`, pr = taskPrio(t.priorita === 'urgente' ? 'urgente' : 'normale');
   const dl = o ? TCFactory.getEffectiveDeadline(o) : null;
   return `
     <article class="task-row is-task">
