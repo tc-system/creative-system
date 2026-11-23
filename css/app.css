@@ -2059,3 +2059,9 @@ html.dark .report-day { color: #fdba74; }
   .om-tot > div:nth-child(n+3) { border-top: 1px solid var(--border); }
   .om-tipo { font-size: 1.5rem; }
 }
+
+/* QR dell'ordine nell'anteprima del modulo (lo stesso stampato nel PDF) */
+.om-qr { flex: none; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px; border-radius: 10px;
+  background: #fff; color: #6F7686; text-decoration: none; font-size: 0.62rem; font-weight: 800; letter-spacing: 0.04em; }
+.om-qr svg { width: 84px; height: 84px; display: block; }
+.om-qr svg path, .om-qr svg rect { shape-rendering: crispEdges; }

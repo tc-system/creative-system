@@ -656,6 +656,8 @@ function orderModuleData(orderId) {
   const colore = tags[0] ? TCFactory.getTagColor(tags[0]) : '#22262C';
   return {
     order, rows, tags,
+    // Ordine del QR: anche dal form di modifica (lì order è null); un ordine nuovo non ancora salvato non ce l'ha
+    qrId: order?.id || AppState.formEditOrder?.id || null,
     tipologia: tags[0] || 'Ordine',
     colore, inchiostro: omInkOn(colore),
     cliente:   order ? order.nome : val('of-nome'),
@@ -757,6 +759,7 @@ function previewOrderModule(orderId) {
           </div>
         </div>
         ${(() => { const lp = modLavParti(order); return lp.length ? `<div class="om-lav"><div class="om-lav-label">Lavorazioni</div>${lp.map(t => `<div class="om-lav-item">${escapeHtml(t)}</div>`).join('')}</div>` : ''; })()}
+        ${(() => { const q = omQr(schedaOrdineUrl(order.id)); return q ? `<a class="om-qr" href="${schedaOrdineUrl(order.id)}" target="_blank" rel="noopener" title="QR dell'ordine: scansionato apre fasi, modulo e bozze">${q.svg()}<span>ORDINE ${escapeHtml(order.id)}</span></a>` : ''; })()}
         <div class="om-actions">
           <button class="btn btn-secondary btn-sm" onclick="downloadOrderModule('${order.id}')">⬇ Scarica PDF</button>
           <button class="btn-icon" onclick="closeModal('file-preview-modal')" aria-label="Chiudi">${Icons.x()}</button>
@@ -896,7 +899,7 @@ function _generatePDF(D) {
     doc.setFontSize(min); return min;
   };
   // QR dell'ordine nell'angolo in alto a destra: scansionato apre la pagina dell'ordine (fasi, modulo, bozze)
-  const qr = D.order ? omQr(schedaOrdineUrl(D.order.id)) : null;
+  const qr = D.qrId ? omQr(schedaOrdineUrl(D.qrId)) : null;
   const QR_S = 22, qrOff = qr ? QR_S + 4 : 0;
   if (qr) {
     const cell = QR_S / qr.n, x0 = pw - M - QR_S, y0 = 8;
@@ -910,7 +913,7 @@ function _generatePDF(D) {
       }
     }
     doc.setFont('helvetica', 'bold'); doc.setFontSize(6); doc.setTextColor(...MUTED);
-    doc.text(`ORDINE ${D.order.id}`, x0 + QR_S / 2, y0 + QR_S + 3, { align: 'center' });
+    doc.text(`ORDINE ${D.qrId}`, x0 + QR_S / 2, y0 + QR_S + 3, { align: 'center' });
   }
   // Lavorazioni: riquadro pieno nel colore della tipologia, in alto a destra (a fianco del QR), ben visibili
   const lavParti = D.lavParti || [];
@@ -1064,7 +1067,7 @@ td{padding:7px 10px;border-bottom:1px solid #E2E5EE;white-space:nowrap}tbody tr:
 <div class="tipo">${escapeHtml(D.tipologia)}${D.isUrgent ? '<span class="urg">URGENTE</span>' : ''}</div>
 <div class="cli">${escapeHtml(D.cliente)}${D.desc ? ` — ${escapeHtml(D.desc)}` : ''}</div>
 <div class="date"><span>Data ordine <b>${omDate(D.data)}</b></span><span>Scadenza <b>${omDate(D.deadline)}</b></span></div>
-</div><div style="display:flex;gap:14px;align-items:flex-start">${(D.lavParti || []).length ? `<div class="lav"><span>Lavorazioni</span>${D.lavParti.map(t => `<b>${escapeHtml(t)}</b>`).join('')}</div>` : ''}${(() => { const q = D.order ? omQr(schedaOrdineUrl(D.order.id)) : null; return q ? `<div class="qr">${q.svg()}<span>ORDINE ${escapeHtml(D.order.id)}</span></div>` : ''; })()}</div></div>
+</div><div style="display:flex;gap:14px;align-items:flex-start">${(D.lavParti || []).length ? `<div class="lav"><span>Lavorazioni</span>${D.lavParti.map(t => `<b>${escapeHtml(t)}</b>`).join('')}</div>` : ''}${(() => { const q = D.qrId ? omQr(schedaOrdineUrl(D.qrId)) : null; return q ? `<div class="qr">${q.svg()}<span>ORDINE ${escapeHtml(D.qrId)}</span></div>` : ''; })()}</div></div>
 <table><thead><tr><th>Fornitore</th><th>Codice</th><th>Descrizione</th><th>Colore</th><th class="c">QNT</th><th class="c">TG</th><th class="r">Prezzo</th><th class="r">Totale</th><th class="c">Ord.</th><th>Lavorazione</th></tr></thead><tbody>${body}</tbody></table>
 <div class="tot"><div><span>Totale prodotti</span><strong>${omPezzi(D.pezzi)}</strong></div><div><span>Totale ordine</span><strong>${omEuro(D.total)}</strong></div><div><span>Acconto</span><strong>${omEuro(D.acconto)}</strong></div><div class="s"><span>Saldo</span><strong>${omEuro(D.total - D.acconto)}</strong></div></div>
 ${D.notes ? `<div class="nl">Note</div><div class="nt">${escapeHtml(D.notes)}</div>` : ''}
