@@ -131,7 +131,7 @@ PDF, ne fa le anteprime JPG delle pagine e un PDF leggero da quelle (`bozze_ante
 max 20 pagine: gli originali di Illustrator pesano decine di MB) e li carica nel bucket privato `bozze` (link dalla
 funzione `file-mattino`, azioni `bozze-carica`/`bozze-togli`), elencati in `ordini_bozze`. Se manca, salva dove
 andrebbe (`ordini_bozze_stato.suggerito`). A fine giro `tc_bozze_task` apre i task **Fare la bozza: <ordine>**
-(Lavorazione grafica, designato riccardo, scadenza dell'ordine; coda BOZZE del Centro di controllo) per gli ordini
+(Lavorazione grafica, assegnati a riccardo, scadenza dell'ordine; coda BOZZE del Centro di controllo) per gli ordini
 non neutri e non ancora Pronto senza bozza, e li chiude quando la bozza c'è o non serve più.
 Sul NAS solo lettura; NAS non collegato → non fa niente. Prova: `python3 -I bozze_nas.py --prova [--ordine 00411]`.
 Database: `sql/bozze-ordini.sql`, `sql/bozze-pdf-task.sql`.
