@@ -29,8 +29,10 @@ tutti i PC, anche Windows, senza collegare niente nel browser.
   `sql/dtf-tiff.sql`). Il tasto **Genera TIFF automatico** chiede la riduzione dello SPOT (0-3 px) e scrive
   `app_settings.dtf_tiff_richieste`; al giro dopo lo script chiama `dtf_tiff.py` (venv a parte in
   `~/Library/Application Support/TC DTF/venv` con pymupdf, numpy, pillow, tifffile; profilo `fogra39.icc` preso
-  dalla libreria di Box Factory Lab): TIF come i fogli BFL (CMYK FOGRA39 300 dpi, neri K100, canale SPOT stile
-  Photoshop = forma di tutto ridotta di N px), misura della pagina, più pagine → `<nome> - pag N.tif`. Il PDF va in
+  dalla libreria di Box Factory Lab): TIF CMYK FOGRA39 300 dpi, neri sempre C0 M0 Y0 K100 (bordi neutri col nero
+  solo in K), canale SPOT1 = forma di tutto ridotta di N px. Il file è scritto con la stessa struttura di un TIF
+  salvato da Photoshop 2026 (modello in `modello_photoshop.json`, da copiare accanto allo script): il RIP legge il
+  bianco solo così (2026-11-23). Misura della pagina, più pagine → `<nome> - pag N.tif`. Il PDF va in
   `PDF originali` (cartella esclusa dalla lettura) e sull'ordine resta solo il TIF. Il task si chiude da solo.
 - **Nomi dei file** (dal 2026-11-20): regola = parti separate da `-`, pezzi in fondo `-<numero>pz`
   (`cliente-cuore-nero-12pz.tif`; spazi dentro una parte vanno bene). Fuori regola (spazi al posto dei trattini o in
