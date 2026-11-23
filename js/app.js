@@ -933,19 +933,19 @@ function _generatePDF(D) {
   }
   const leftW = pw - 2 * M - qrOff - (lavW ? lavW + 6 : 0);
   doc.setFont('helvetica', 'bold'); doc.setTextColor(...C);
-  fitSize(D.tipologia.toUpperCase(), leftW - (D.isUrgent && !lavW ? 25 : 0), 24);
-  doc.text(D.tipologia.toUpperCase(), M, 20);
+  fitSize(D.tipologia.toUpperCase(), leftW - (D.isUrgent && !lavW ? 25 : 0), 12);
+  doc.text(D.tipologia.toUpperCase(), M, 15);
   if (D.isUrgent) {
     doc.setFontSize(10); doc.setTextColor(...RED);
-    doc.text('URGENTE', R, lavW ? lavBottom + 5 : 20, { align: 'right' });
+    doc.text('URGENTE', R, lavW ? lavBottom + 5 : 15, { align: 'right' });
   }
 
   // Cliente — descrizione
-  let y = 28;
+  let y = 25;   // nome dell'ordine grande, tipologia piccola sopra (richiesta Riccardo 2026-11-23)
   doc.setFont('helvetica', 'bold'); doc.setTextColor(...INK);
   const cliTxt = D.cliente + (D.desc ? ` — ${D.desc}` : '');
-  fitSize(cliTxt, leftW, 12);
-  doc.text(cliTxt, M, y); y += 5.5;
+  fitSize(cliTxt, leftW, 22);
+  doc.text(cliTxt, M, y); y += 7;
 
   // Data ordine — scadenza
   doc.setFontSize(9.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...MUTED);
@@ -1048,9 +1048,9 @@ function _generatePrintPreview(D) {
     : '<tr><td colspan="10" class="c" style="color:#6F7686;padding:20px">Nessuna riga</td></tr>';
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Modulo - ${escapeHtml(D.cliente)}</title>
 <style>body{font-family:Nunito,'Segoe UI',Arial,sans-serif;margin:24px;color:#22262C}
-.tipo{font-size:30px;font-weight:900;color:${D.colore};text-transform:uppercase;line-height:1.1}
+.tipo{font-size:15px;font-weight:900;color:${D.colore};text-transform:uppercase;line-height:1.1}
 .urg{font-size:12px;color:#d62828;border:2px solid #d62828;border-radius:99px;padding:2px 10px;vertical-align:middle;margin-left:8px}
-.cli{font-size:16px;font-weight:800;margin-top:6px}.date{font-size:12px;color:#6F7686;margin:4px 0 14px;display:flex;gap:24px}.date b{color:#22262C}
+.cli{font-size:28px;font-weight:900;margin-top:4px;line-height:1.1}.date{font-size:12px;color:#6F7686;margin:4px 0 14px;display:flex;gap:24px}.date b{color:#22262C}
 table{width:100%;border-collapse:collapse;font-size:12px}
 th{background:${D.colore};color:${D.inchiostro};padding:8px 10px;white-space:nowrap;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em}
 td{padding:7px 10px;border-bottom:1px solid #E2E5EE;white-space:nowrap}tbody tr:nth-child(even) td{background:#F4F6FC}
