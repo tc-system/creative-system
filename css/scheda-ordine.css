@@ -38,28 +38,27 @@ body.so-aperta { overflow: hidden; }
 .so-vuoto, .so-nota { margin: 0; font-size: 0.88rem; color: var(--text-muted); overflow-wrap: anywhere; }
 .so-nota { margin-top: 8px; font-size: 0.78rem; }
 
-/* Fasi: pulsanti grandi per il dito */
-.so-gruppo + .so-gruppo { margin-top: 12px; }
-.so-gruppo-nome { font-size: 0.75rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 6px; }
-.so-fasi { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+/* Fasi: tutte in un'unica riga, divise in parti uguali (se sono tante la riga scorre di lato) */
+.so-fasi { display: flex; gap: 6px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .so-fase {
-  display: grid; grid-template-columns: 26px 1fr; align-items: center; column-gap: 8px;
-  min-height: 60px; padding: 10px 16px; text-align: left;
-  border-radius: 999px; border: 2px solid var(--border); background: var(--surface); color: var(--text-primary);
+  flex: 1 1 0; min-width: 72px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  min-height: 70px; padding: 8px 6px; text-align: center;
+  border-radius: var(--radius-lg); border: 2px solid var(--border); background: var(--surface); color: var(--text-primary);
   font: inherit; cursor: pointer; touch-action: manipulation;
 }
 .so-fase-segno {
-  grid-row: span 2; width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--border);
-  display: grid; place-items: center; font-weight: 900; font-size: 0.9rem;
+  flex: none; width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--border);
+  display: grid; place-items: center; font-weight: 900; font-size: 0.85rem;
 }
-.so-fase-nome { font-weight: 800; font-size: 1rem; }
-.so-fase-data { grid-column: 2; font-size: 0.75rem; color: var(--text-muted); }
+.so-fase-nome { font-weight: 800; font-size: 0.82rem; line-height: 1.1; max-width: 100%; overflow-wrap: anywhere; }
+.so-fase-data { font-size: 0.68rem; color: var(--text-muted); min-height: 0.8em; }
 .so-fase.is-fatto { border-color: #16a34a; background: color-mix(in srgb, #16a34a 14%, var(--surface)); }
 .so-fase.is-fatto .so-fase-segno { background: #16a34a; border-color: #16a34a; color: #fff; }
 .so-fase.is-mezzo { border-color: #eab308; background: color-mix(in srgb, #facc15 22%, var(--surface)); }
 .so-fase.is-mezzo .so-fase-segno { background: #facc15; border-color: #eab308; color: #422006; }
-.so-fase:disabled { opacity: 0.55; cursor: not-allowed; }
-.so-fase:not(:disabled):active { transform: scale(0.98); }
+.so-fase.is-bloccato { opacity: 0.5; }
+.so-fase:not(.is-bloccato):active { transform: scale(0.97); }
 
 /* Bozze: le pagine del PDF come immagini, grandi */
 .so-bozza-file + .so-bozza-file { margin-top: 14px; }
@@ -76,6 +75,7 @@ body.so-aperta { overflow: hidden; }
 .so-bozza-pdf { display: grid; place-items: center; font-weight: 900; font-size: 1.3rem; color: #d62828; }
 .so-bozza-nome { font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .so-allegati { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
+.so-gruppo-nome { font-size: 0.75rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 6px; }
 .so-allegati .so-gruppo-nome { width: 100%; margin: 0; }
 
 /* Modulo: tabella che scorre di lato, righe alte per il dito */
