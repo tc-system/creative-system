@@ -25,7 +25,7 @@ create table if not exists public.social_messaggi (
   testo text,
   allegati jsonb not null default '[]'::jsonb,
   at timestamptz not null default now(),
-  inviato_da uuid,                        -- app_users.id di chi ha risposto dal gestionale
+  inviato_da uuid,                        -- auth_id (app_users.auth_id) di chi ha risposto dal gestionale
   errore text
 );
 create index if not exists social_messaggi_conv on public.social_messaggi (conversazione, at);

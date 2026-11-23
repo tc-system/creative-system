@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
     const jwt = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
     const { data: caller } = await db.auth.getUser(jwt);
     if (!caller?.user) return reply({ success: false, error: 'Accesso richiesto' }, 401);
-    const { data: me } = await db.from('app_users').select('id').eq('auth_id', caller.user.id).maybeSingle();
+    const { data: me } = await db.from('app_users').select('nickname, auth_id').eq('auth_id', caller.user.id).maybeSingle();
     if (!me) return reply({ success: false, error: 'Accesso negato' }, 403);
   }
 
