@@ -61,14 +61,16 @@ body.so-aperta { overflow: hidden; }
 .so-fase:disabled { opacity: 0.55; cursor: not-allowed; }
 .so-fase:not(:disabled):active { transform: scale(0.98); }
 
-/* Bozze */
-.so-bozze { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+/* Bozze: le pagine del PDF come immagini, grandi */
+.so-bozza-file + .so-bozza-file { margin-top: 14px; }
+.so-bozza-apri { display: inline-block; margin-bottom: 8px; font-size: 0.85rem; font-weight: 700; color: var(--text-primary); overflow-wrap: anywhere; }
+.so-bozze { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
 .so-bozza {
   display: flex; flex-direction: column; gap: 6px; min-width: 0;
   color: inherit; text-decoration: none;
 }
 .so-bozza img, .so-bozza-pdf {
-  width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: var(--radius-md);
+  width: 100%; aspect-ratio: 4 / 3; object-fit: contain; border-radius: var(--radius-md);
   background: var(--bg-primary); border: 1px solid var(--border-light);
 }
 .so-bozza-pdf { display: grid; place-items: center; font-weight: 900; font-size: 1.3rem; color: #d62828; }

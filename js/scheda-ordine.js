@@ -4,7 +4,8 @@
  * Il PDF del modulo porta in alto a destra un QR con https://cs.pngs.it/dashboard.html?ordine=<id>.
  * Scansionato (fotocamera del telefono/iPad, o lettore di codici collegato), apre a tutto schermo:
  *   • le FASI dell'ordine, gli stessi pulsanti del gestionale (Pulsanti.toggle), grandi per il dito;
- *   • le BOZZE dalla cartella "bozze" del cliente sul NAS (le porta il Mac mini, sql/bozze-ordini.sql)
+ *   • le BOZZE: il PDF «<numero> bozza.pdf» nella cartella del cliente, anno corrente, sul NAS (lo porta il
+ *     Mac mini con le immagini delle pagine e un PDF leggero, sql/bozze-pdf-task.sql)
  *     e gli allegati dell'ordine;
  *   • il MODULO in lettura: si possono solo evidenziare le righe e scrivere le note di riga.
  * La vede chiunque sia registrato. Un lettore di codici (USB o Bluetooth, modalità tastiera) funziona
@@ -14,7 +15,7 @@
 const SchedaOrdine = {
   id: null,
   bozze: [],          // [{ nome, percorso, tipo, peso, url }]
-  cartella: undefined, // undefined = non ancora controllata dal Mac mini, null = cartella bozze non trovata
+  stato: undefined,   // { cartella, suggerito } dal Mac mini; undefined = non ancora controllato, 'errore'
   _carico: 0,
 
   // All'avvio del gestionale: ?ordine=<id> nell'indirizzo (QR scansionato con la fotocamera)
@@ -34,7 +35,7 @@ const SchedaOrdine = {
     const o = TCFactory.getOrderById(id);
     if (!o) { showToast(`Ordine ${id} non trovato`, 'error'); return; }
     this.id = id;
-    this.bozze = []; this.cartella = undefined;
+    this.bozze = []; this.stato = undefined;
     migrateModPreviewChecks(id);
     this.render();
     await this._caricaBozze(id);
@@ -50,23 +51,24 @@ const SchedaOrdine = {
     const giro = ++this._carico;
     try {
       const [b, st] = await Promise.all([
-        supabaseClient.from('ordini_bozze').select('nome, percorso, tipo, peso, mtime').eq('order_id', id).order('mtime', { ascending: false }),
-        supabaseClient.from('ordini_bozze_stato').select('cartella').eq('order_id', id).maybeSingle(),
+        supabaseClient.from('ordini_bozze').select('nome, percorso, tipo, peso, mtime, pagine').eq('order_id', id).order('mtime', { ascending: false }),
+        supabaseClient.from('ordini_bozze_stato').select('cartella, suggerito').eq('order_id', id).maybeSingle(),
       ]);
       if (b.error) throw b.error;
       const righe = b.data || [];
       let link = {};
       if (righe.length) {
-        const { data, error } = await supabaseClient.storage.from('bozze').createSignedUrls(righe.map(r => r.percorso), 3600);
+        const percorsi = righe.flatMap(r => [r.percorso, ...(r.pagine || [])]);
+        const { data, error } = await supabaseClient.storage.from('bozze').createSignedUrls(percorsi, 3600);
         if (error) throw error;
         link = Object.fromEntries((data || []).map(x => [x.path, x.signedUrl]));
       }
       if (giro !== this._carico || this.id !== id) return;
-      this.bozze = righe.map(r => ({ ...r, url: link[r.percorso] || '' }));
-      this.cartella = st.data ? st.data.cartella : undefined;
+      this.bozze = righe.map(r => ({ ...r, url: link[r.percorso] || '', pagineUrl: (r.pagine || []).map(p => link[p]).filter(Boolean) }));
+      this.stato = st.data || undefined;
     } catch (e) {
       console.error('[bozze]', e);
-      if (giro === this._carico) this.cartella = 'errore';
+      if (giro === this._carico) this.stato = 'errore';
     }
     if (this.id === id) this._rendiBozze();
   },
@@ -159,26 +161,27 @@ const SchedaOrdine = {
     if (!st.done) showToast(`${Pulsanti.nome(p)} · ${o.nome}`);
   },
 
+  // Bozza = PDF «<numero> bozza.pdf» dal NAS: le sue pagine come immagini (tocco = PDF leggero a tutto schermo)
   _bozzeHtml(o) {
     const allegati = o.files || [];
-    const anno = new Date().getFullYear();
+    const nomeFile = `${o.id} bozza.pdf`;
     let stato = '';
-    if (this.cartella === 'errore') stato = 'Bozze non caricate: riprova.';
-    else if (!this.bozze.length) stato = this.cartella === undefined
-      ? `Il Mac mini non ha ancora cercato le bozze di questo ordine (cartella del cliente → ${anno} → bozze).`
-      : this.cartella ? `Nessuna bozza in ${escapeHtml(this.cartella)}.`
-      : `Cartella bozze non trovata sul NAS: va in cartella del cliente → ${anno} → bozze.`;
-    const tile = (b) => {
-      const img = b.tipo?.startsWith('image/');
-      return `<a class="so-bozza" href="${escapeHtml(b.url)}" target="_blank" rel="noopener" title="${escapeHtml(b.nome)}">
-          ${img ? `<img src="${escapeHtml(b.url)}" alt="" loading="lazy">` : `<span class="so-bozza-pdf">PDF</span>`}
-          <span class="so-bozza-nome">${escapeHtml(b.nome)}</span>
-        </a>`;
-    };
+    if (this.stato === 'errore') stato = 'Bozze non caricate: riprova.';
+    else if (!this.bozze.length) stato = this.stato === undefined
+      ? `Il Mac mini non ha ancora cercato la bozza di questo ordine (entro 5 minuti).`
+      : `Manca la bozza: salva sul NAS <strong>${escapeHtml(nomeFile)}</strong>${this.stato.suggerito ? ` in <strong>${escapeHtml(this.stato.suggerito)}</strong>` : ' nella cartella del cliente, anno corrente'}.`;
+    const bozza = (b) => `
+      <div class="so-bozza-file">
+        <a class="so-bozza-apri" href="${escapeHtml(b.url)}" target="_blank" rel="noopener">${escapeHtml(b.nome)} · apri PDF</a>
+        ${b.pagineUrl.length ? `<div class="so-bozze">${b.pagineUrl.map((u, k) => `
+          <a class="so-bozza" href="${escapeHtml(b.url)}#page=${k + 1}" target="_blank" rel="noopener" title="Pagina ${k + 1}">
+            <img src="${escapeHtml(u)}" alt="Bozza, pagina ${k + 1}" loading="lazy">
+          </a>`).join('')}</div>` : ''}
+      </div>`;
     return `
-      <h3>Bozze${this.bozze.length ? ` <span class="so-conta">${this.bozze.length}</span>` : ''}</h3>
-      ${this.bozze.length ? `<div class="so-bozze">${this.bozze.map(tile).join('')}</div>` : ''}
-      ${this.bozze.length && this.cartella ? `<p class="so-nota">Dal NAS: ${escapeHtml(this.cartella)}</p>` : ''}
+      <h3>Bozze${this.bozze.length > 1 ? ` <span class="so-conta">${this.bozze.length}</span>` : ''}</h3>
+      ${this.bozze.map(bozza).join('')}
+      ${this.bozze.length && this.stato?.cartella ? `<p class="so-nota">Dal NAS: ${escapeHtml(this.stato.cartella)}</p>` : ''}
       ${stato ? `<p class="so-vuoto">${stato}</p>` : ''}
       ${allegati.length ? `<div class="so-allegati"><div class="so-gruppo-nome">Allegati dell'ordine</div>
         ${allegati.map((f, i) => `<button type="button" class="td-file" onclick="taskApriAllegato('${o.id}', ${i})">${f.type?.startsWith('image/') ? '🖼' : f.type === 'application/pdf' ? '📄' : '📎'} <span>${escapeHtml(f.name || 'Allegato')}</span></button>`).join('')}
