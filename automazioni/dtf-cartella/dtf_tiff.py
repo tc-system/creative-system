@@ -1,6 +1,6 @@
 """T&C Factory — PDF → TIF per il DTF, come i fogli di Box Factory Lab (shopify-mattino/dtf.py):
   • CMYK Coated FOGRA39 a 300 dpi, misura della pagina del PDF;
-  • neri ricchi e quasi neri portati a 0/0/0/100;
+  • neri SEMPRE C0 M0 Y0 K100 (richiesta utente 2026-11-23); bordi e sfumature neutre col nero solo in K;
   • canale extra SPOT1 salvato come Photoshop (tinta piatta, inchiostro = 0): la forma di tutto quello
     che è stampato (il fondo trasparente resta senza bianco), ridotta di RIDUZIONE pixel (0, 1, 2 o 3).
     Il RIP del DTF lo legge come canale del bianco solo se il file è uguale a quelli salvati da Photoshop
@@ -29,12 +29,19 @@ SOGLIA_NEUTRO = 0.07
 
 
 def neri_k100(cmyk):
+    """Neri solo in K: il nero pieno (anche ricco o quasi nero) diventa 0/0/0/100 e ogni pixel neutro che
+    contiene nero (bordi tra il nero e un grigio, sfumature) diventa solo K con la stessa densità.
+    I grigi fatti senza nero e i colori non si toccano."""
     f = cmyk.astype(np.float32) / 255
     k = 1 - f[..., 3]
     rgb = np.stack([(1 - f[..., 0]) * k, (1 - f[..., 1]) * k, (1 - f[..., 2]) * k], -1)
-    nero = (rgb.max(-1) < SOGLIA_NERO) & (rgb.max(-1) - rgb.min(-1) < SOGLIA_NEUTRO)
+    neutro = rgb.max(-1) - rgb.min(-1) < SOGLIA_NEUTRO
+    luce = rgb.mean(-1)
+    solo_k = neutro & ((cmyk[..., 3] >= 8) | (rgb.max(-1) < SOGLIA_NERO))
     out = cmyk.copy()
-    out[nero] = (0, 0, 0, 255)
+    densita = np.clip((1 - luce) / (1 - SOGLIA_NERO), 0, 1)
+    out[..., :3][solo_k] = 0
+    out[..., 3][solo_k] = np.round(densita[solo_k] * 255).astype(np.uint8)
     return out
 
 
