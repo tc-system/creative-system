@@ -1,8 +1,11 @@
 """T&C Factory — PDF → TIF per il DTF, come i fogli di Box Factory Lab (shopify-mattino/dtf.py):
   • CMYK Coated FOGRA39 a 300 dpi, misura della pagina del PDF;
   • neri ricchi e quasi neri portati a 0/0/0/100;
-  • canale extra SPOT salvato come Photoshop (tinta piatta, inchiostro = 0): la forma di tutto quello
+  • canale extra SPOT1 salvato come Photoshop (tinta piatta, inchiostro = 0): la forma di tutto quello
     che è stampato (il fondo trasparente resta senza bianco), ridotta di RIDUZIONE pixel (0, 1, 2 o 3).
+    Il RIP del DTF lo legge come canale del bianco solo se il file è uguale a quelli salvati da Photoshop
+    (2026-11-23: i TIF senza queste informazioni non davano il bianco): stesse risorse Photoshop
+    (nome, identificatori dei canali, risoluzione, versione), Software, predictor, orientamento e XMP.
 Una pagina → <nome>.tif; più pagine → <nome> - pag 1.tif, <nome> - pag 2.tif…
 I file si scrivono prima come .part e poi si rinominano: nella cartella non resta mai un TIF a metà.
 
@@ -35,14 +38,37 @@ def neri_k100(cmyk):
     return out
 
 
+SOFTWARE = 'Adobe Photoshop 27.11 (Macintosh)'
+
+
 def risorse_photoshop():
-    """Canale extra "SPOT" come lo salva Photoshop: tinta piatta rossa, opacità 100% (come dtf.py)."""
+    """Risorse come le scrive Photoshop per un TIF CMYK con un canale tinta piatta "SPOT1" (rosso, 100%)."""
     def blocco(rid, dati):
         return b'8BIM' + rid.to_bytes(2, 'big') + b'\x00\x00' + len(dati).to_bytes(4, 'big') + dati + b'\x00' * (len(dati) % 2)
-    nomi = blocco(0x03EE, b'\x04SPOT')
-    unicode_ = blocco(0x0415, (5).to_bytes(4, 'big') + 'SPOT\x00'.encode('utf-16-be'))
-    display = blocco(0x0435, b'\x00\x00\x00\x01' + b'\x00\x00' + b'\xff\xff\x00\x00\x00\x00\x00\x00' + b'\x00\x64' + b'\x02')
-    return nomi + unicode_ + display
+    ris = (DPI << 16).to_bytes(4, 'big') + b'\x00\x01\x00\x02'          # 300 dpi, mostrati in cm
+    return b''.join([
+        blocco(0x03ED, ris + ris),
+        blocco(0x03EE, b'\x05SPOT1'),
+        blocco(0x0415, (6).to_bytes(4, 'big') + 'SPOT1\x00'.encode('utf-16-be')),
+        blocco(0x0435, b'\x00\x00\x00\x01' + b'\x00\x00' + b'\xff\xff\x00\x00\x00\x00\x00\x00' + b'\x00\x64' + b'\x02'),
+        blocco(0x041D, (2).to_bytes(4, 'big')),                          # identificatore del canale
+        blocco(0x0414, (2).to_bytes(4, 'big')),
+        blocco(0x0421, bytes.fromhex('00000001010000000f00410064006f00620065002000500068006f0074006f00730068006f007000000014'
+                                     '00410064006f00620065002000500068006f0074006f00730068006f00700020003200300032003600000001')),
+    ])
+
+
+def xmp(larghezza, altezza):
+    return f"""<?xpacket begin="\ufeff" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+<rdf:Description rdf:about="" xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmlns:dc="http://purl.org/dc/elements/1.1/"
+ xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/" xmlns:tiff="http://ns.adobe.com/tiff/1.0/">
+<xmp:CreatorTool>{SOFTWARE}</xmp:CreatorTool><dc:format>image/tiff</dc:format>
+<photoshop:ColorMode>4</photoshop:ColorMode><photoshop:ICCProfile>Coated FOGRA39 (ISO 12647-2:2004)</photoshop:ICCProfile>
+<tiff:ImageWidth>{larghezza}</tiff:ImageWidth><tiff:ImageLength>{altezza}</tiff:ImageLength>
+<tiff:PhotometricInterpretation>5</tiff:PhotometricInterpretation><tiff:SamplesPerPixel>5</tiff:SamplesPerPixel>
+</rdf:Description></rdf:RDF></x:xmpmeta>
+<?xpacket end="w"?>""".encode('utf-8')
 
 
 def pagina_in_tif(pagina, dest, riduzione, icc):
@@ -53,12 +79,15 @@ def pagina_in_tif(pagina, dest, riduzione, icc):
     cmyk, alfa = neri_k100(np.ascontiguousarray(a[..., :4])), a[..., 4]
     if alfa.max() == 0:
         raise ValueError('pagina vuota')
-    spot = alfa if riduzione <= 0 else np.asarray(Image.fromarray(alfa, 'L').filter(ImageFilter.MinFilter(2 * riduzione + 1)))
+    spot = alfa if riduzione <= 0 else np.asarray(Image.fromarray(alfa).filter(ImageFilter.MinFilter(2 * riduzione + 1)))
     dati = np.dstack([cmyk, 255 - spot])
     tmp = dest + '.part'
-    tifffile.imwrite(tmp, dati, photometric='separated', extrasamples=[0], compression='zlib',
+    x = xmp(dati.shape[1], dati.shape[0])
+    tifffile.imwrite(tmp, dati, photometric='separated', extrasamples=[0], compression='zlib', predictor=True,
                      resolution=(DPI, DPI), resolutionunit='INCH', iccprofile=icc, metadata=None,
-                     extratags=[(34377, 7, None, risorse_photoshop(), True)])
+                     software=SOFTWARE, datetime=True,
+                     extratags=[(274, 3, 1, 1, True), (700, 1, len(x), x, True),
+                                (34377, 7, None, risorse_photoshop(), True)])
     os.replace(tmp, dest)
 
 
