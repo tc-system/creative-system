@@ -121,9 +121,13 @@ totale capi. Una sottocartella col numero d'ordine (es. `2026/dtf/00404 felpe`) 
 
 ## Bozze degli ordini → pagina dell'ordine (QR del modulo) e coda BOZZE
 
-Regola (Riccardo, 2026-11-23): niente cartella "bozze". Per ogni ordine **un PDF con dentro le bozze**, nella
-cartella del cliente, anno corrente (va bene anche in una sottocartella, es. la lavorazione), con il numero
-d'ordine e "bozza" nel nome: `Clienti/B/Black Birds/2026/00411 bozza.pdf`. Le cartelle dtf/tif/stampato non si guardano.
+Regola (Riccardo, 2026-11-23): niente cartella "bozze" e niente numero d'ordine. Per ogni ordine **un PDF con dentro
+le bozze**, nella cartella del cliente, anno corrente (va bene anche in una sottocartella, es. la lavorazione), con
+"bozza" e il nome dell'ordine nel nome, e semmai la lavorazione (descrizione dell'ordine):
+`Clienti/B/Black Birds/2026/BLACK BIRDS COMPETITION bozza.pdf`, `CrossFit/Crossfit Monza/2026/CROSSFIT MONZA - FELPE bozza.pdf`.
+Tra gli ordini aperti dello stesso cliente la bozza va a quello di cui nomina più parole della lavorazione (nel nome
+o nella sottocartella); quella che non ne nomina nessuna va agli ordini rimasti senza bozza. Le cartelle
+dtf/tif/stampato non si guardano.
 
 `bozze_nas.py` gira ogni **5 minuti** sul Mac mini (crontab di csauto, `bozze.log`), con la stessa configurazione
 e lo stesso NAS di `dtf_cartella.py`. Per ogni ordine aperto (non evaso, non archiviato, non eliminato) trova il

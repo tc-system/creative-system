@@ -4,12 +4,17 @@ Gira ogni 5 minuti sul Mac mini (utente csauto, crontab), accanto a dtf_cartella
 configurazione, collegamento al NAS e ricerca della cartella del cliente.
 
 Regola (Riccardo, 2026-11-23): per ogni ordine UN PDF con dentro le bozze, nella cartella del cliente,
-anno corrente (va bene anche in una sottocartella, es. quella della lavorazione), col numero d'ordine e
-"bozza" nel nome:   <cliente>/<anno>/00411 bozza.pdf
+anno corrente (va bene anche in una sottocartella, es. quella della lavorazione), con "bozza" e il nome
+dell'ordine nel nome, e semmai la lavorazione (= descrizione dell'ordine). Niente numero d'ordine:
+    <cliente>/<anno>/CROSSFIT MONZA bozza.pdf
+    <cliente>/<anno>/CROSSFIT MONZA - FELPE bozza.pdf     (cliente con più ordini nello stesso anno)
+Abbinamento tra gli ordini aperti dello stesso cliente: una bozza che nomina (nel nome o nella sottocartella)
+le parole della lavorazione di un ordine va a quell'ordine; quella che non nomina nessuna lavorazione va agli
+ordini del cliente che non hanno una bozza loro.
 Per ogni ordine aperto del gestionale (non evaso, non archiviato, non eliminato):
   • trova la cartella del cliente (DATI/Clienti/<iniziale>/<cliente> o DATI/CrossFit/<box>, stesso
     abbinamento dei DTF: cliente collegato all'ordine, altrimenti nome dell'ordine);
-  • cerca nell'anno corrente i PDF con "bozz" e il numero dell'ordine nel nome (non nelle cartelle dtf/tif);
+  • cerca nell'anno corrente i PDF con "bozz" nel nome (non nelle cartelle dtf/tif) e li abbina come sopra;
   • carica nel bucket privato "bozze" le anteprime JPG delle pagine e un PDF leggero fatto da quelle
     (bozze_anteprime.py, venv con pymupdf; gli originali di Illustrator pesano decine di MB) e li elenca in ordini_bozze; se mancano salva dove andrebbero (percorso suggerito per il task).
 A fine giro tc_bozze_task apre/chiude i task "Fare la bozza" (coda BOZZE del Centro di controllo).
@@ -33,15 +38,16 @@ import urllib.request
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from dtf_cartella import (CARTELLA, DIR_DATI, _lavorazione, cartelle_clienti, leggi_config,  # noqa: E402
-                          monta_nas, rpc, salta, tokens, trova_cliente)
+from dtf_cartella import (CARTELLA, DIR_DATI, GENERICHE, _lavorazione, cartelle_clienti,  # noqa: E402
+                          leggi_config, monta_nas, rpc, salta, tokens, trova_cliente)
 
 MAX_PESO = 2 * 1024 ** 3          # originali anche pesanti: nel gestionale va il PDF leggero fatto dalle anteprime
 VENV_PY = os.path.join(DIR_DATI, 'venv', 'bin', 'python')
 ANTEPRIME = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bozze_anteprime.py')
 NON_QUI = re.compile(r'dtf|^tiff?$|stampato|pdf originali', re.I)   # cartelle dei file di stampa: le bozze non stanno lì
 STATO_BOZZE = os.path.join(DIR_DATI, 'bozze-stato.json')
-VERSIONE = 2   # cambia → tutti gli ordini si risalvano (nuova regola, anteprime)
+VERSIONE = 3   # cambia → tutti gli ordini si risalvano (3: niente numero d'ordine, nome + lavorazione)
+NON_CONTANO = GENERICHE | {'bozza', 'bozze', 'definitiva', 'definitivo', 'finale', 'versione', 'merch', 'abbigliamento'}
 
 
 def funzione(cfg, dati):
@@ -55,16 +61,9 @@ def funzione(cfg, dati):
     return out
 
 
-def numero(order_id):
-    """Il numero dell'ordine nel nome del file: 00411 → "411" o "00411" (non dentro altri numeri, es. 2026)."""
-    cifre = re.sub(r'\D', '', order_id).lstrip('0')
-    return re.compile(rf'(?<!\d)0*{cifre}(?!\d)') if cifre else None
-
-
-def cerca_bozze(order_id, anno):
-    """PDF delle bozze dell'ordine nella cartella dell'anno (sottocartelle comprese, max 3 livelli), i più recenti prima."""
-    num = numero(order_id)
-    if not num or not os.path.isdir(anno):
+def bozze_pdf(anno):
+    """PDF con "bozz" nel nome nella cartella dell'anno (sottocartelle comprese, max 3 livelli, no dtf/tif)."""
+    if not os.path.isdir(anno):
         return []
     out = []
     for radice, dirs, files in os.walk(anno):
@@ -72,7 +71,7 @@ def cerca_bozze(order_id, anno):
         if radice.count(os.sep) - anno.count(os.sep) >= 3:
             dirs[:] = []
         for n in files:
-            if salta(n) or not n.lower().endswith('.pdf') or not re.search(r'bozz', n, re.I) or not num.search(n):
+            if salta(n) or not n.lower().endswith('.pdf') or not re.search(r'bozz', n, re.I):
                 continue
             p = os.path.join(radice, n)
             st = os.stat(p)
@@ -80,6 +79,37 @@ def cerca_bozze(order_id, anno):
                 out.append((unicodedata.normalize('NFC', os.path.relpath(p, anno)), p, st.st_size, round(st.st_mtime, 3)))
     out.sort(key=lambda x: -x[3])
     return out
+
+
+def parole(testo, togli=()):
+    return {t for t in tokens(testo) if len(t) >= 3 and not t.isdigit() and t not in NON_CONTANO and t not in togli}
+
+
+def abbina_bozze(ordini, pdf):
+    """{id ordine: [pdf]} tra gli ordini aperti di uno stesso cliente: la bozza va all'ordine di cui nomina più parole
+    della lavorazione; quelle che non ne nominano nessuna vanno agli ordini rimasti senza bozza."""
+    nomi = set().union(*(set(tokens(o.get('nome'))) | set(tokens(o.get('cliente'))) for o in ordini))
+    lav = {o['id']: parole(o.get('descr'), nomi) for o in ordini}
+    per = {o['id']: [] for o in ordini}
+    generiche = []
+    for f in pdf:
+        w = parole(f[0], nomi)
+        punti = {i: len(w & l) for i, l in lav.items()}
+        best = max(punti.values(), default=0)
+        if best:
+            for i, n in punti.items():
+                if n == best:
+                    per[i].append(f)
+        else:
+            generiche.append(f)
+    return {i: v or generiche for i, v in per.items()}
+
+
+def nome_file(o):
+    """Nome da dare al PDF: «<nome ordine> bozza.pdf», con la lavorazione se c'è."""
+    nome = re.sub(r'\s+', ' ', (o.get('nome') or '').replace('/', '-')).strip()
+    descr = re.sub(r'\s+', ' ', (o.get('descr') or '').replace('/', '-')).strip()
+    return f"{nome}{' - ' + descr if descr else ''} bozza.pdf"
 
 
 def dove_salvare(o, cli, dati_root):
@@ -156,16 +186,30 @@ def main():
     cartelle = cartelle_clienti(dati_root)
     anno = str(datetime.now().year)
     caricati = tolti = 0
-    for o in dati.get('ordini') or []:
+    # Cartella del cliente di ogni ordine aperto, poi le bozze abbinate tra gli ordini dello stesso cliente
+    ordini = dati.get('ordini') or []
+    cli_di, gruppi = {}, {}
+    for o in ordini:
+        cli = trova_cliente(o, cartelle)
+        cli_di[o['id']] = cli
+        if cli:
+            gruppi.setdefault(cli, []).append(o)
+    bozze_di = {}
+    for cli, gruppo in gruppi.items():
+        try:
+            bozze_di.update(abbina_bozze(gruppo, bozze_pdf(os.path.join(cli, anno))))
+        except OSError as e:
+            print(cli, 'cartella non letta:', e, file=sys.stderr)
+            for o in gruppo:
+                bozze_di[o['id']] = None
+    for o in ordini:
         if a.ordine and o['id'] != a.ordine:
             continue
-        try:
-            cli = trova_cliente(o, cartelle)
-            trovati = cerca_bozze(o['id'], os.path.join(cli, anno)) if cli else []
-            suggerito = dove_salvare(o, cli, dati_root)
-        except OSError as e:
-            print(o['id'], 'cartella non letta:', e, file=sys.stderr)
+        cli = cli_di[o['id']]
+        trovati = bozze_di.get(o['id'], [])
+        if trovati is None:
             continue
+        suggerito = dove_salvare(o, cli, dati_root)
         cartella = os.path.relpath(os.path.join(cli, anno), dati_root) if cli else ''
         prima = {b['nome']: b for b in o.get('bozze') or []}
         elenco, nuovi = [], []
@@ -177,13 +221,13 @@ def main():
                            'pagine': (b.get('pagine') or []) if uguale else []})
             if not uguale:
                 nuovi.append((elenco[-1], p))
-        firma = hashlib.sha1(json.dumps([VERSIONE, cartella, suggerito, [(x['nome'], x['peso'], x['mtime']) for x in elenco]],
+        firma = hashlib.sha1(json.dumps([VERSIONE, cartella, suggerito, nome_file(o), [(x['nome'], x['peso'], x['mtime']) for x in elenco]],
                                         sort_keys=True).encode()).hexdigest()
         if not nuovi and firme.get(o['id']) == firma and len(elenco) == len(prima):
             continue
         if a.prova:
-            print(f"{o['id']} {o['nome']}: {len(elenco)} bozze ({len(nuovi)} da caricare)"
-                  + ('' if elenco else f" — da salvare in {suggerito or '?'} come «{o['id']} bozza.pdf»"))
+            print(f"{o['id']} {o['nome']}: {len(elenco)} bozze ({len(nuovi)} da caricare) {[x['nome'] for x in elenco]}"
+                  + ('' if elenco else f" — da salvare in {suggerito or '?'} come «{nome_file(o)}»"))
             continue
         try:
             with tempfile.TemporaryDirectory() as tmp:
@@ -204,7 +248,7 @@ def main():
                 funzione(cfg, {'chiave': cfg['chiave'], 'azione': 'bozze-togli', 'percorsi': giu})
                 tolti += len(giu)
             r = rpc(cfg, 'tc_bozze_salva', {'p_chiave': cfg['chiave'], 'p_order_id': o['id'], 'p_cartella': cartella,
-                                            'p_files': elenco, 'p_suggerito': suggerito})
+                                            'p_files': elenco, 'p_suggerito': suggerito, 'p_nome_file': nome_file(o)})
             if not r.get('success'):
                 raise RuntimeError(r.get('error'))
             firme[o['id']] = firma

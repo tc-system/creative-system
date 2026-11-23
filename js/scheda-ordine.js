@@ -4,7 +4,7 @@
  * Il PDF del modulo porta in alto a destra un QR con https://cs.pngs.it/dashboard.html?ordine=<id>.
  * Scansionato (fotocamera del telefono/iPad, o lettore di codici collegato), apre a tutto schermo:
  *   • le FASI dell'ordine, gli stessi pulsanti del gestionale (Pulsanti.toggle), grandi per il dito;
- *   • le BOZZE: il PDF «<numero> bozza.pdf» nella cartella del cliente, anno corrente, sul NAS (lo porta il
+ *   • le BOZZE: il PDF «<nome ordine> [- <lavorazione>] bozza.pdf» nella cartella del cliente, anno corrente, sul NAS (lo porta il
  *     Mac mini con le immagini delle pagine e un PDF leggero, sql/bozze-pdf-task.sql)
  *     e gli allegati dell'ordine;
  *   • il MODULO in lettura: si possono solo evidenziare le righe e scrivere le note di riga.
@@ -52,7 +52,7 @@ const SchedaOrdine = {
     try {
       const [b, st] = await Promise.all([
         supabaseClient.from('ordini_bozze').select('nome, percorso, tipo, peso, mtime, pagine').eq('order_id', id).order('mtime', { ascending: false }),
-        supabaseClient.from('ordini_bozze_stato').select('cartella, suggerito').eq('order_id', id).maybeSingle(),
+        supabaseClient.from('ordini_bozze_stato').select('cartella, suggerito, nome_file').eq('order_id', id).maybeSingle(),
       ]);
       if (b.error) throw b.error;
       const righe = b.data || [];
@@ -161,10 +161,10 @@ const SchedaOrdine = {
     if (!st.done) showToast(`${Pulsanti.nome(p)} · ${o.nome}`);
   },
 
-  // Bozza = PDF «<numero> bozza.pdf» dal NAS: le sue pagine come immagini (tocco = PDF leggero a tutto schermo)
+  // Bozza = PDF «<nome ordine> bozza.pdf» dal NAS: le sue pagine come immagini (tocco = PDF leggero a tutto schermo)
   _bozzeHtml(o) {
     const allegati = o.files || [];
-    const nomeFile = `${o.id} bozza.pdf`;
+    const nomeFile = this.stato?.nome_file || `${o.nome} bozza.pdf`;
     let stato = '';
     if (this.stato === 'errore') stato = 'Bozze non caricate: riprova.';
     else if (!this.bozze.length) stato = this.stato === undefined
