@@ -3,13 +3,13 @@
   • neri SEMPRE C0 M0 Y0 K100 (richiesta utente 2026-11-23); bordi e sfumature neutre col nero solo in K;
   • canale extra SPOT1 salvato come Photoshop (tinta piatta, inchiostro = 0): la forma di tutto quello
     che è stampato (il fondo trasparente resta senza bianco), ridotta di RIDUZIONE pixel (0, 1, 2 o 3).
-    Il RIP del DTF lo legge come canale del bianco solo se il file è uguale a quelli salvati da Photoshop
-    (2026-11-23: i TIF senza queste informazioni non davano il bianco): stesse risorse Photoshop
-    (nome, identificatori dei canali, risoluzione, versione), Software, predictor, orientamento e XMP.
+    Il RIP del DTF legge il bianco solo dai TIF uguali a quelli salvati da Photoshop: il file si scrive
+    a mano con la stessa struttura di un TIF salvato da Photoshop 2026 (tag, strisce, risorse, miniatura,
+    IPTC, Exif, XMP; modello in modello_photoshop.json). 2026-11-23: con tifffile il RIP non vedeva lo SPOT.
 Una pagina → <nome>.tif; più pagine → <nome> - pag 1.tif, <nome> - pag 2.tif…
 I file si scrivono prima come .part e poi si rinominano: nella cartella non resta mai un TIF a metà.
 
-Gira nel suo ambiente (venv con pymupdf, numpy, pillow, tifffile), chiamato da dtf_cartella.py.
+Gira nel suo ambiente (venv con pymupdf, numpy, pillow), chiamato da dtf_cartella.py.
 Uso:  dtf_tiff.py PDF RIDUZIONE --icc fogra39.icc
 Stampa in JSON i nomi dei TIF scritti.
 """
@@ -20,7 +20,6 @@ import sys
 
 import numpy as np
 import pymupdf
-import tifffile
 from PIL import Image, ImageFilter
 
 DPI = 300
@@ -46,36 +45,198 @@ def neri_k100(cmyk):
 
 
 SOFTWARE = 'Adobe Photoshop 27.11 (Macintosh)'
+MODELLO = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'modello_photoshop.json')
 
 
-def risorse_photoshop():
-    """Risorse come le scrive Photoshop per un TIF CMYK con un canale tinta piatta "SPOT1" (rosso, 100%)."""
-    def blocco(rid, dati):
-        return b'8BIM' + rid.to_bytes(2, 'big') + b'\x00\x00' + len(dati).to_bytes(4, 'big') + dati + b'\x00' * (len(dati) % 2)
-    ris = (DPI << 16).to_bytes(4, 'big') + b'\x00\x01\x00\x02'          # 300 dpi, mostrati in cm
-    return b''.join([
-        blocco(0x03ED, ris + ris),
-        blocco(0x03EE, b'\x05SPOT1'),
-        blocco(0x0415, (6).to_bytes(4, 'big') + 'SPOT1\x00'.encode('utf-16-be')),
-        blocco(0x0435, b'\x00\x00\x00\x01' + b'\x00\x00' + b'\xff\xff\x00\x00\x00\x00\x00\x00' + b'\x00\x64' + b'\x02'),
-        blocco(0x041D, (2).to_bytes(4, 'big')),                          # identificatore del canale
-        blocco(0x0414, (2).to_bytes(4, 'big')),
-        blocco(0x0421, bytes.fromhex('00000001010000000f00410064006f00620065002000500068006f0074006f00730068006f007000000014'
-                                     '00410064006f00620065002000500068006f0074006f00730068006f00700020003200300032003600000001')),
-    ])
+def _blocco(rid, dati):
+    return b'8BIM' + rid.to_bytes(2, 'big') + b'\x00\x00' + len(dati).to_bytes(4, 'big') + dati + b'\x00' * (len(dati) % 2)
 
 
-def xmp(larghezza, altezza):
-    return f"""<?xpacket begin="\ufeff" id="W5M0MpCehiHzreSzNTczkc9d"?>
-<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
-<rdf:Description rdf:about="" xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmlns:dc="http://purl.org/dc/elements/1.1/"
- xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/" xmlns:tiff="http://ns.adobe.com/tiff/1.0/">
-<xmp:CreatorTool>{SOFTWARE}</xmp:CreatorTool><dc:format>image/tiff</dc:format>
-<photoshop:ColorMode>4</photoshop:ColorMode><photoshop:ICCProfile>Coated FOGRA39 (ISO 12647-2:2004)</photoshop:ICCProfile>
-<tiff:ImageWidth>{larghezza}</tiff:ImageWidth><tiff:ImageLength>{altezza}</tiff:ImageLength>
-<tiff:PhotometricInterpretation>5</tiff:PhotometricInterpretation><tiff:SamplesPerPixel>5</tiff:SamplesPerPixel>
-</rdf:Description></rdf:RDF></x:xmpmeta>
-<?xpacket end="w"?>""".encode('utf-8')
+def miniatura(rgb):
+    """Risorsa 040C: anteprima JPEG come la scrive Photoshop (lato lungo 160 px)."""
+    import io
+    im = Image.fromarray(rgb)
+    im.thumbnail((160, 160))
+    buf = io.BytesIO()
+    im.save(buf, 'JPEG', quality=80)
+    jpg = buf.getvalue()
+    w, h = im.size
+    wb = (w * 24 + 31) // 32 * 4
+    return (b''.join(x.to_bytes(4, 'big') for x in (1, w, h, wb, wb * h, len(jpg)))
+            + (24).to_bytes(2, 'big') + (1).to_bytes(2, 'big') + jpg)
+
+
+def risorse_photoshop(modello, larghezza, altezza, nome, rgb):
+    """Tutte le risorse di un TIF salvato da Photoshop 2026 (CMYK + tinta piatta SPOT1), nello stesso ordine,
+    prese dal modello (modello_photoshop.json, estratto da un TIF salvato da Photoshop il 2026-11-23);
+    si rifanno solo le sezioni (misure e nome) e la miniatura."""
+    out = []
+    for rid, tipo, dati in modello['risorse']:
+        rid = int(rid, 16)
+        if tipo == 'MINIATURA':
+            d = miniatura(rgb)
+        elif tipo == 'SLICES':
+            resto = bytes.fromhex(dati).replace(b'\xff\xffWW', larghezza.to_bytes(4, 'big')).replace(b'\xff\xffHH', altezza.to_bytes(4, 'big'))
+            d = ((6).to_bytes(4, 'big') + b'\x00' * 8 + altezza.to_bytes(4, 'big') + larghezza.to_bytes(4, 'big')
+                 + len(nome).to_bytes(4, 'big') + nome.encode('utf-16-be') + resto)
+        else:
+            d = bytes.fromhex(dati)
+        out.append(_blocco(rid, d))
+    return b''.join(out)
+
+
+def xmp(larghezza, altezza, adesso):
+    import uuid
+    quando = adesso.strftime('%Y-%m-%dT%H:%M:%S') + adesso.strftime('%z')[:3] + ':' + adesso.strftime('%z')[3:]
+    iid, did = uuid.uuid4(), uuid.uuid4()
+    testo = f"""<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 10.0-c000 79.4332aae, 2026/08/17-13:39:43        ">
+   <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+      <rdf:Description rdf:about=""
+            xmlns:xmp="http://ns.adobe.com/xap/1.0/"
+            xmlns:dc="http://purl.org/dc/elements/1.1/"
+            xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/"
+            xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/"
+            xmlns:stEvt="http://ns.adobe.com/xap/1.0/sType/ResourceEvent#"
+            xmlns:tiff="http://ns.adobe.com/tiff/1.0/"
+            xmlns:exif="http://ns.adobe.com/exif/1.0/">
+         <xmp:CreatorTool>{SOFTWARE}</xmp:CreatorTool>
+         <xmp:ModifyDate>{quando}</xmp:ModifyDate>
+         <xmp:CreateDate>{quando}</xmp:CreateDate>
+         <xmp:MetadataDate>{quando}</xmp:MetadataDate>
+         <dc:format>image/tiff</dc:format>
+         <photoshop:ColorMode>4</photoshop:ColorMode>
+         <photoshop:ICCProfile>Coated FOGRA39 (ISO 12647-2:2004)</photoshop:ICCProfile>
+         <xmpMM:InstanceID>xmp.iid:{iid}</xmpMM:InstanceID>
+         <xmpMM:DocumentID>xmp.did:{did}</xmpMM:DocumentID>
+         <xmpMM:OriginalDocumentID>xmp.did:{did}</xmpMM:OriginalDocumentID>
+         <xmpMM:History>
+            <rdf:Seq>
+               <rdf:li rdf:parseType="Resource">
+                  <stEvt:action>saved</stEvt:action>
+                  <stEvt:instanceID>xmp.iid:{iid}</stEvt:instanceID>
+                  <stEvt:when>{quando}</stEvt:when>
+                  <stEvt:softwareAgent>{SOFTWARE}</stEvt:softwareAgent>
+                  <stEvt:changed>/</stEvt:changed>
+               </rdf:li>
+            </rdf:Seq>
+         </xmpMM:History>
+         <tiff:ImageWidth>{larghezza}</tiff:ImageWidth>
+         <tiff:ImageLength>{altezza}</tiff:ImageLength>
+         <tiff:BitsPerSample>
+            <rdf:Seq>
+               <rdf:li>8</rdf:li>
+               <rdf:li>8</rdf:li>
+               <rdf:li>8</rdf:li>
+               <rdf:li>8</rdf:li>
+               <rdf:li>8</rdf:li>
+            </rdf:Seq>
+         </tiff:BitsPerSample>
+         <tiff:Compression>8</tiff:Compression>
+         <tiff:PhotometricInterpretation>5</tiff:PhotometricInterpretation>
+         <tiff:Orientation>1</tiff:Orientation>
+         <tiff:SamplesPerPixel>5</tiff:SamplesPerPixel>
+         <tiff:PlanarConfiguration>1</tiff:PlanarConfiguration>
+         <tiff:XResolution>3000000/10000</tiff:XResolution>
+         <tiff:YResolution>3000000/10000</tiff:YResolution>
+         <tiff:ResolutionUnit>2</tiff:ResolutionUnit>
+         <exif:ColorSpace>65535</exif:ColorSpace>
+         <exif:PixelXDimension>{larghezza}</exif:PixelXDimension>
+         <exif:PixelYDimension>{altezza}</exif:PixelYDimension>
+      </rdf:Description>
+   </rdf:RDF>
+</x:xmpmeta>
+"""
+    return (testo + (' ' * 99 + '\n') * 20 + '<?xpacket end="w"?>').encode('utf-8')
+
+
+def scrivi_tif_photoshop(dest, dati, icc, nome, rgb_anteprima):
+    """TIF little-endian scritto come Photoshop 2026: stessi tag nello stesso ordine, strisce da ~1 MB
+    compresse ZIP con predictor orizzontale, IPTC, Exif, XMP e risorse Photoshop (canale SPOT1)."""
+    import datetime
+    import struct
+    import zlib
+    altezza, larghezza, n = dati.shape
+    adesso = datetime.datetime.now().astimezone()
+    modello = json.load(open(MODELLO))
+    righe = max(1, 1048576 // (larghezza * n))
+    strisce = []
+    for y in range(0, altezza, righe):
+        blocco = dati[y:y + righe].copy()
+        blocco[:, 1:] = (dati[y:y + righe, 1:].astype(np.int16) - dati[y:y + righe, :-1]).astype(np.uint8)
+        strisce.append(zlib.compress(blocco.tobytes(), 6))
+    corto = lambda v: 3 if v < 65536 else 4                          # SHORT o LONG come Photoshop
+    SHORT, LONG, RAT, ASCII, BYTE, UNDEF = 3, 4, 5, 2, 1, 7
+    tag = [
+        (254, LONG, [0]), (256, corto(larghezza), [larghezza]), (257, corto(altezza), [altezza]),
+        (258, SHORT, [8] * n), (259, SHORT, [8]), (262, SHORT, [5]), (273, LONG, None), (274, SHORT, [1]),
+        (277, SHORT, [n]), (278, corto(righe), [righe]), (279, LONG, [len(x) for x in strisce]),
+        (282, RAT, [(DPI * 10000, 10000)]), (283, RAT, [(DPI * 10000, 10000)]), (284, SHORT, [1]), (296, SHORT, [2]),
+        (305, ASCII, (SOFTWARE + '\x00').encode()), (306, ASCII, (adesso.strftime('%Y:%m:%d %H:%M:%S') + '\x00').encode()),
+        (317, SHORT, [2]), (338, SHORT, [0]), (700, BYTE, xmp(larghezza, altezza, adesso)),
+        (33723, UNDEF, bytes.fromhex(modello['iptc'])),
+        (34377, BYTE, risorse_photoshop(modello, larghezza, altezza, nome, rgb_anteprima)),
+        (34665, LONG, None), (34675, UNDEF, icc),
+    ]
+    exif = [(40961, SHORT, [65535]), (40962, corto(larghezza), [larghezza]), (40963, corto(altezza), [altezza])]
+
+    def valore(tipo, v):
+        if isinstance(v, bytes):
+            return v
+        f = {SHORT: '<H', LONG: '<I'}
+        if tipo == RAT:
+            return b''.join(struct.pack('<II', *x) for x in v)
+        return b''.join(struct.pack(f[tipo], x) for x in v)
+
+    ifd_len = 2 + 12 * len(tag) + 4
+    exif_len = 2 + 12 * len(exif) + 4
+    pos = 8 + ifd_len + exif_len
+    esterni, voci = [], {}
+    offset_exif = 8 + ifd_len
+
+    def metti(tabella):
+        nonlocal pos
+        for code, tipo, v in tabella:
+            if v is None:
+                continue
+            b = valore(tipo, v)
+            if len(b) > 4:
+                pos += pos % 2
+                voci[code] = (len(b) // {SHORT: 2, LONG: 4, RAT: 8}.get(tipo, 1), pos, b)
+                esterni.append((pos, b))
+                pos += len(b)
+            else:
+                voci[code] = (len(b) // {SHORT: 2, LONG: 4, RAT: 8}.get(tipo, 1), None, b.ljust(4, b'\x00'))
+    metti(tag)
+    metti(exif)
+    offsets = []
+    for st in strisce:
+        pos += pos % 2
+        offsets.append(pos)
+        esterni.append((pos, st))
+        pos += len(st)
+    b = valore(LONG, offsets)
+    if len(b) > 4:
+        voci[273] = (len(offsets), pos, b)
+        esterni.append((pos, b))
+        pos += len(b)
+    else:
+        voci[273] = (1, None, b)
+    voci[34665] = (1, None, struct.pack('<I', offset_exif))
+
+    def ifd(tabella):
+        out = struct.pack('<H', len(tabella))
+        for code, tipo, _ in tabella:
+            cnt, off, b = voci[code]
+            out += struct.pack('<HHI', code, tipo, cnt) + (struct.pack('<I', off) if off is not None else b)
+        return out + b'\x00\x00\x00\x00'
+    tmp = dest + '.part'
+    with open(tmp, 'wb') as f:
+        f.write(b'II*\x00' + struct.pack('<I', 8) + ifd(tag) + ifd(exif))
+        for o, b in esterni:
+            f.seek(o)
+            f.write(b)
+    os.replace(tmp, dest)
 
 
 def pagina_in_tif(pagina, dest, riduzione, icc):
@@ -87,15 +248,10 @@ def pagina_in_tif(pagina, dest, riduzione, icc):
     if alfa.max() == 0:
         raise ValueError('pagina vuota')
     spot = alfa if riduzione <= 0 else np.asarray(Image.fromarray(alfa).filter(ImageFilter.MinFilter(2 * riduzione + 1)))
-    dati = np.dstack([cmyk, 255 - spot])
-    tmp = dest + '.part'
-    x = xmp(dati.shape[1], dati.shape[0])
-    tifffile.imwrite(tmp, dati, photometric='separated', extrasamples=[0], compression='zlib', predictor=True,
-                     resolution=(DPI, DPI), resolutionunit='INCH', iccprofile=icc, metadata=None,
-                     software=SOFTWARE, datetime=True,
-                     extratags=[(274, 3, 1, 1, True), (700, 1, len(x), x, True),
-                                (34377, 7, None, risorse_photoshop(), True)])
-    os.replace(tmp, dest)
+    dati = np.ascontiguousarray(np.dstack([cmyk, 255 - spot]))
+    f = cmyk.astype(np.float32) / 255
+    rgb = (np.stack([(1 - f[..., i]) * (1 - f[..., 3]) for i in range(3)], -1) * 255).astype(np.uint8)
+    scrivi_tif_photoshop(dest, dati, icc, os.path.splitext(os.path.basename(dest))[0], rgb)
 
 
 def main():
