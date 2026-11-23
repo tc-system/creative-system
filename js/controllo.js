@@ -1211,7 +1211,7 @@ function renderTaskTable() {
         <td>${taskChiSelect(t)}</td>
         <td class="tk-num">${t.minuti_stimati ? ctrlFmtMin(t.minuti_stimati) : '<span class="tk-none">—</span>'}</td>
         <td>${statoTag(t)}</td>
-        <td class="tk-more"><button class="btn-icon" onclick="openTaskDetail('${t.id}')" aria-label="Dettagli di ${escapeHtml(t.titolo)}">${CtrlIcons.more()}</button></td>
+        <td class="tk-more"><button class="btn-icon" onclick="openTaskDetail('${t.id}')" aria-label="Dettagli di ${escapeHtml(t.titolo)}">${CtrlIcons.more()}</button>${taskXBtn(t)}</td>
       </tr>`;
   };
   return `
@@ -1847,7 +1847,7 @@ function renderTaskRow(t, { showOwner = false, showStore = true, showAuto = true
       <div class="task-badges">${badges}</div>
       <span class="task-time">${t.minuti_stimati ? `${Icons.clock(12)} ${ctrlFmtMin(t.minuti_stimati)}` : ''}${taskMisurato(t) ? `<span class="task-timer ${t.stato === 'in_lavorazione' ? 'is-on' : ''}" data-task-timer="${t.id}" title="Tempo misurato">${ctrlFmtDur(taskLavoratoSec(t))}</span>` : ''}</span>
       <div class="task-actions">${Ctrl.canAct(t) ? taskQuickActions(t, { assegna: false, fatto: false }) : ''}
-        <button type="button" class="ctrl-btn task-open" onclick="openTaskDetail('${t.id}')" aria-label="Apri ${escapeHtml(t.titolo)}">Apri</button>
+        <button type="button" class="ctrl-btn task-open" onclick="openTaskDetail('${t.id}')" aria-label="Apri ${escapeHtml(t.titolo)}">Apri</button>${taskXBtn(t)}
       </div>
     </article>`;
 }
@@ -2810,6 +2810,11 @@ async function submitTaskMotivo(id) {
     _taskAction = null;
     if (Ctrl.get(id)) openTaskDetail(id); else closeModal(CTRL_MODAL);
   }
+}
+
+// X sulla riga: elimina il task (solo admin, con conferma)
+function taskXBtn(t) {
+  return TCAuth.isAdmin() ? `<button type="button" class="btn-icon task-x" onclick="event.stopPropagation();removeTask('${t.id}')" aria-label="Elimina ${escapeHtml(t.titolo)}" title="Elimina">${Icons.x(14)}</button>` : '';
 }
 
 async function removeTask(id) {

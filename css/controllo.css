@@ -979,7 +979,9 @@ html.dark .tk-av-num.is-up b, html.dark .tk-av-num.is-up small { color: #f87171;
 }
 .tk-delta.is-late { color: #dc2626; background: color-mix(in srgb, #ef4444 12%, transparent); }
 .tk-num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.tk-more { width: 44px; text-align: right; }
+.tk-more { width: 80px; text-align: right; white-space: nowrap; }
+.task-x { color: var(--text-muted, #888); }
+.task-x:hover { color: var(--priority-urgent); }
 .tk-more-rows { display: flex; justify-content: center; padding: 12px; border-top: 1px solid var(--border-light, var(--border)); }
 
 html.dark .tk-count.is-red, html.dark .tk-date.is-late, html.dark .tk-date.is-late svg, html.dark .tk-delta.is-late { color: #f87171; }
