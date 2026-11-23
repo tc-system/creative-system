@@ -5326,7 +5326,7 @@ function renderUsoMac() {
 // Claude dai consumi veri (vista cervello_costo_giorni), gli altri fissi dal mese in cui si pagano.
 // Previsione: speso finora + ritmo per giorno lavorativo × giorni lavorativi che mancano; il ritmo
 // mescola quello del mese e quello del mese prima, pesati su quanto mese è passato.
-const CtrlCosti = { righe: null, giorni: [], assistente: [], error: null, aperto: null };
+const CtrlCosti = { righe: null, giorni: [], assistente: [], voce: [], error: null, aperto: null };
 
 function apriMeseCosti(m) {
   CtrlCosti.aperto = CtrlCosti.aperto === m ? null : m;
@@ -5334,12 +5334,15 @@ function apriMeseCosti(m) {
 }
 
 async function loadControlCosti() {
-  const [fissi, claude, assist] = await Promise.all([
+  const [fissi, claude, assist, voce] = await Promise.all([
     supabaseClient.from('costi_gestionale').select('*').order('ordine').order('created_at'),
     supabaseClient.from('cervello_costo_giorni').select('giorno, usd').order('giorno').limit(5000),
     // Assistente (sql/assistente-consumi.sql): una riga per ogni domanda passata a Haiku
     supabaseClient.from('assistente_consumi').select('utente, at, costo_usd').order('at', { ascending: false }).limit(20000),
+    // Voce Google (sql/voce-consumi.sql): caratteri letti, per la quota gratuita
+    supabaseClient.from('voce_consumi').select('at, caratteri').gte('at', ctrlOggi().slice(0, 8) + '01').limit(20000),
   ]);
+  CtrlCosti.voce = voce.data || [];
   CtrlCosti.assistente = (assist.data || []).map(r => ({ utente: r.utente, at: r.at, usd: Number(r.costo_usd || 0) }));
   CtrlCosti.error = fissi.error || claude.error || null;
   CtrlCosti.righe = fissi.data || [];
@@ -5401,6 +5404,7 @@ function renderCostiAssistente(usd) {
         <div><span>Spesa totale</span><strong>${usd4(tot)}</strong></div>
         <div><span>Questo mese</span><strong>${usd4(totMese)}</strong></div>
         <div><span>Domande a Haiku</span><strong>${righe.length}</strong></div>
+        <div><span>Voce Google questo mese</span><strong>${CtrlCosti.voce.reduce((t, r) => t + (r.caratteri || 0), 0).toLocaleString('it-IT')} caratteri</strong></div>
       </div>
       ${elenco.length ? `<div class="table-scroll"><table class="data-table costi-table">
         <thead><tr><th>Persona</th><th>Domande questo mese</th><th>Spesa questo mese</th><th>Domande in tutto</th><th>Spesa in tutto</th><th>Ultima</th></tr></thead>
