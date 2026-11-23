@@ -2812,9 +2812,9 @@ async function submitTaskMotivo(id) {
   }
 }
 
-// X sulla riga: elimina il task (solo admin, con conferma)
+// X rossa sulla riga: elimina il task (per tutti, con conferma)
 function taskXBtn(t) {
-  return TCAuth.isAdmin() ? `<button type="button" class="btn-icon task-x" onclick="event.stopPropagation();removeTask('${t.id}')" aria-label="Elimina ${escapeHtml(t.titolo)}" title="Elimina">${Icons.x(14)}</button>` : '';
+  return `<button type="button" class="task-x" onclick="event.stopPropagation();removeTask('${t.id}')" aria-label="Elimina ${escapeHtml(t.titolo)}" title="Elimina">${Icons.x(14)}</button>`;
 }
 
 async function removeTask(id) {
