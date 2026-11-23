@@ -5326,7 +5326,7 @@ function renderUsoMac() {
 // Claude dai consumi veri (vista cervello_costo_giorni), gli altri fissi dal mese in cui si pagano.
 // Previsione: speso finora + ritmo per giorno lavorativo × giorni lavorativi che mancano; il ritmo
 // mescola quello del mese e quello del mese prima, pesati su quanto mese è passato.
-const CtrlCosti = { righe: null, giorni: [], error: null, aperto: null };
+const CtrlCosti = { righe: null, giorni: [], assistente: [], error: null, aperto: null };
 
 function apriMeseCosti(m) {
   CtrlCosti.aperto = CtrlCosti.aperto === m ? null : m;
@@ -5334,10 +5334,13 @@ function apriMeseCosti(m) {
 }
 
 async function loadControlCosti() {
-  const [fissi, claude] = await Promise.all([
+  const [fissi, claude, assist] = await Promise.all([
     supabaseClient.from('costi_gestionale').select('*').order('ordine').order('created_at'),
     supabaseClient.from('cervello_costo_giorni').select('giorno, usd').order('giorno').limit(5000),
+    // Assistente (sql/assistente-consumi.sql): una riga per ogni domanda passata a Haiku
+    supabaseClient.from('assistente_consumi').select('utente, at, costo_usd').order('at', { ascending: false }).limit(20000),
   ]);
+  CtrlCosti.assistente = (assist.data || []).map(r => ({ utente: r.utente, at: r.at, usd: Number(r.costo_usd || 0) }));
   CtrlCosti.error = fissi.error || claude.error || null;
   CtrlCosti.righe = fissi.data || [];
   CtrlCosti.giorni = (claude.data || []).map(g => ({ giorno: g.giorno, usd: Number(g.usd || 0) }));
@@ -5370,6 +5373,45 @@ async function eliminaCosto(id, nome) {
   const { error } = await supabaseClient.from('costi_gestionale').delete().eq('id', id);
   if (error) return showToast(error.message, 'error');
   loadControlCosti();
+}
+
+// Assistente: spesa totale e chi l'ha usato quanto (domande passate a Claude Haiku)
+function renderCostiAssistente(usd) {
+  const righe = CtrlCosti.assistente;
+  const mese = ctrlOggi().slice(0, 7);
+  const delMese = (r) => new Date(r.at).toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' }).startsWith(mese);
+  const tot = righe.reduce((t, r) => t + r.usd, 0);
+  const totMese = righe.filter(delMese).reduce((t, r) => t + r.usd, 0);
+  const persone = {};
+  righe.forEach(r => {
+    const p = persone[r.utente] ||= { utente: r.utente, n: 0, usd: 0, nMese: 0, usdMese: 0, ultima: r.at };
+    p.n++; p.usd += r.usd;
+    if (delMese(r)) { p.nMese++; p.usdMese += r.usd; }
+    if (r.at > p.ultima) p.ultima = r.at;
+  });
+  const elenco = Object.values(persone).sort((a, b) => b.usd - a.usd);
+  const quando = (iso) => new Date(iso).toLocaleString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  // Importi piccoli: 4 decimali, altrimenti si vedrebbe sempre 0,00 $
+  const usd4 = (v) => v < 1 ? `${v.toLocaleString('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 4 })} $` : usd(v);
+  return `
+    <section class="glass-card page-card ctrl-group">
+      <div class="page-card-head"><h2>Assistente</h2>
+        <span class="ctrl-group-hint">Solo le domande che l'assistente non capisce da solo passano a Claude Haiku. Già comprese in API Claude</span></div>
+      <div class="costi-assist-tot">
+        <div><span>Spesa totale</span><strong>${usd4(tot)}</strong></div>
+        <div><span>Questo mese</span><strong>${usd4(totMese)}</strong></div>
+        <div><span>Domande a Haiku</span><strong>${righe.length}</strong></div>
+      </div>
+      ${elenco.length ? `<div class="table-scroll"><table class="data-table costi-table">
+        <thead><tr><th>Persona</th><th>Domande questo mese</th><th>Spesa questo mese</th><th>Domande in tutto</th><th>Spesa in tutto</th><th>Ultima</th></tr></thead>
+        <tbody>${elenco.map(p => `<tr>
+          <td><strong>${escapeHtml(p.utente)}</strong></td>
+          <td>${p.nMese}</td><td>${usd4(p.usdMese)}</td>
+          <td>${p.n}</td><td><strong>${usd4(p.usd)}</strong></td>
+          <td class="ctrl-cell-sub">${quando(p.ultima)}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>` : '<div class="empty-list">Nessuna domanda passata a Haiku finora.</div>'}
+    </section>`;
 }
 
 // Mesi dal primo costo a oggi, ognuno con effettivo e previsione (Claude + fissi)
@@ -5458,6 +5500,8 @@ function renderControlCosti() {
       </table></div>` : '<div class="empty-list">Nessun costo ancora.</div>'}
     </section>
 
+    ${renderCostiAssistente(usd)}
+
     <section class="glass-card page-card ctrl-group">
       <div class="page-card-head"><h2>Servizi</h2>
         <span class="ctrl-group-hint">Quelli a pagamento di Creative System, Live Printing e Kamon. Importi in dollari</span>
@@ -5470,7 +5514,7 @@ function renderControlCosti() {
             <td class="ctrl-cell-sub">a consumo</td>
             <td></td><td></td>
             <td><strong>${usd(ora?.prevClaude ?? null)}</strong></td>
-            <td class="ctrl-cell-sub">Il cervello di Creative System (Live Printing e Kamon non usano Claude): previsione di questo mese</td>
+            <td class="ctrl-cell-sub">Il cervello e l'assistente di Creative System (Live Printing e Kamon non usano Claude): previsione di questo mese</td>
             <td></td>
           </tr>
           ${CtrlCosti.righe.map(r => `<tr>
