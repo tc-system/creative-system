@@ -33,7 +33,9 @@ const Intro = {
     let forza = /[?&#]intro\b/.test(location.search + location.hash), visto = false;
     try { visto = sessionStorage.getItem(this.KEY) === '1'; } catch {}
     const ridotto = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    const ok = !!el && (forza || (!visto && !ridotto));
+    // Aperto dal QR del modulo d'ordine: si va dritti all'ordine (ogni scansione apre una scheda nuova)
+    const qr = /[?&]ordine=/.test(location.search);
+    const ok = !!el && !qr && (forza || (!visto && !ridotto));
     if (!ok) el?.remove();
     return ok;
   },

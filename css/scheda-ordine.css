@@ -30,7 +30,7 @@ body.so-aperta { overflow: hidden; }
 .so-corpo {
   flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
   padding: 16px 16px max(24px, env(safe-area-inset-bottom));
-  display: grid; gap: 16px; align-content: start;
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-content: start;
 }
 .so-sez { background: var(--surface); border: 1px solid var(--border-light); border-radius: var(--radius-lg); padding: 14px 16px; min-width: 0; }
 .so-sez h3 { margin: 0 0 10px; font-size: 0.78rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
