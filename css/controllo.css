@@ -980,8 +980,9 @@ html.dark .tk-av-num.is-up b, html.dark .tk-av-num.is-up small { color: #f87171;
 .tk-delta.is-late { color: #dc2626; background: color-mix(in srgb, #ef4444 12%, transparent); }
 .tk-num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .tk-more { width: 80px; text-align: right; white-space: nowrap; }
-.task-x { color: var(--text-muted, #888); }
-.task-x:hover { color: var(--priority-urgent); }
+.task-x { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 999px; background: #dc2626; color: #fff; cursor: pointer; flex-shrink: 0; vertical-align: middle; margin-left: 4px; }
+.task-x:hover { background: #b91c1c; }
+.task-x:focus-visible { outline: 2px solid #dc2626; outline-offset: 2px; }
 .tk-more-rows { display: flex; justify-content: center; padding: 12px; border-top: 1px solid var(--border-light, var(--border)); }
 
 html.dark .tk-count.is-red, html.dark .tk-date.is-late, html.dark .tk-date.is-late svg, html.dark .tk-delta.is-late { color: #f87171; }
