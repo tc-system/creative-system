@@ -686,13 +686,10 @@ function omDeadlineClass(dl) {
   return diff < 0 ? 'is-late' : diff <= 7 ? 'is-soon' : '';
 }
 
-function previewOrderModule(orderId) {
-  const D = orderModuleData(orderId);
-  if (!D) return;
+// Tabella del modulo con totali e note: anteprima del modulo e pagina dell'ordine aperta col QR
+// (lì senza "Approva": il modulo è in lettura, si possono solo evidenziare le righe e scrivere le note)
+function omCorpoHtml(D, { approva = true } = {}) {
   const { order, rows } = D;
-  const modal = document.getElementById('file-preview-modal');
-
-  migrateModPreviewChecks(order.id);
   const checks = modPreviewChecks(order.id);
   const renderModRow = (r) => {
     const t   = (parseFloat(r.qnt)||0)*(parseFloat(r.prezzo)||0);
@@ -716,15 +713,38 @@ function previewOrderModule(orderId) {
   // Preventivo: intestazione ambra con il totale e il pulsante per approvarlo
   const prevHeaderRow = (m) => `<tr><td colspan="11" class="mod-prev-head">
       <div><strong>${escapeHtml(m.label)}</strong> · da approvare — non ordinare · Totale ${omEuro(rowsTotal(m.rows))}</div>
-      <button type="button" class="btn btn-sm mod-prev-approve" onclick="event.stopPropagation();approvePreventivo('${order.id}',${m.g})">✓ Approva</button>
+      ${approva ? `<button type="button" class="btn btn-sm mod-prev-approve" onclick="event.stopPropagation();approvePreventivo('${order.id}',${m.g})">✓ Approva</button>` : ''}
     </td></tr>`;
   const groups = moduleGroups(rows);
   const rowsHtml = rows.length
     ? groups.map((m, k) => (m.prev ? prevHeaderRow(m) : k ? integHeaderRow(m.label) : '') + m.rows.map(renderModRow).join('')).join('')
     : `<tr><td colspan="11" class="om-empty">Nessuna riga</td></tr>`;
-  const nPrev = groups.filter(m => m.prev).length;
-  const th = (txt, cls = '') => `<th class="${cls}">${txt}</th>`;
 
+  const th = (txt, cls = '') => `<th class="${cls}">${txt}</th>`;
+  return `
+        <div class="om-scroll">
+          <table class="om-table">
+            <thead><tr>${th('', 'om-tools')}${th('Fornitore')}${th('Codice')}${th('Descrizione')}${th('Colore')}${th('QNT', 'om-c')}${th('TG', 'om-c')}${th('Prezzo', 'om-r')}${th('Totale', 'om-r')}${th('Ord.', 'om-c')}${th('Lavorazione')}</tr></thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+        <div class="om-tot">
+          <div><span>Totale prodotti</span><strong>${omPezzi(D.pezzi)}</strong></div>
+          <div><span>Totale ordine</span><strong>${omEuro(D.total)}</strong></div>
+          <div><span>Acconto</span><strong>${omEuro(D.acconto)}</strong></div>
+          <div class="om-saldo"><span>Saldo</span><strong>${omEuro(D.total - D.acconto)}</strong></div>
+        </div>
+        ${D.notes ? `<div class="om-note"><div class="om-label">Note</div><div class="om-note-text">${escapeHtml(D.notes)}</div></div>` : ''}`;
+}
+
+function previewOrderModule(orderId) {
+  const D = orderModuleData(orderId);
+  if (!D) return;
+  const { order } = D;
+  const modal = document.getElementById('file-preview-modal');
+
+  migrateModPreviewChecks(order.id);
+  const nPrev = moduleGroups(D.rows).filter(m => m.prev).length;
   modal.innerHTML = `
     <div class="modal modal-fullscreen om" style="--om-c:${D.colore};--om-fg:${D.inchiostro};">
       <div class="modal-header om-head">
@@ -742,20 +762,7 @@ function previewOrderModule(orderId) {
           <button class="btn-icon" onclick="closeModal('file-preview-modal')" aria-label="Chiudi">${Icons.x()}</button>
         </div>
       </div>
-      <div class="modal-body om-body">
-        <div class="om-scroll">
-          <table class="om-table">
-            <thead><tr>${th('', 'om-tools')}${th('Fornitore')}${th('Codice')}${th('Descrizione')}${th('Colore')}${th('QNT', 'om-c')}${th('TG', 'om-c')}${th('Prezzo', 'om-r')}${th('Totale', 'om-r')}${th('Ord.', 'om-c')}${th('Lavorazione')}</tr></thead>
-            <tbody>${rowsHtml}</tbody>
-          </table>
-        </div>
-        <div class="om-tot">
-          <div><span>Totale prodotti</span><strong>${omPezzi(D.pezzi)}</strong></div>
-          <div><span>Totale ordine</span><strong>${omEuro(D.total)}</strong></div>
-          <div><span>Acconto</span><strong>${omEuro(D.acconto)}</strong></div>
-          <div class="om-saldo"><span>Saldo</span><strong>${omEuro(D.total - D.acconto)}</strong></div>
-        </div>
-        ${D.notes ? `<div class="om-note"><div class="om-label">Note</div><div class="om-note-text">${escapeHtml(D.notes)}</div></div>` : ''}
+      <div class="modal-body om-body">${omCorpoHtml(D)}
       </div>
     </div>
   `;
@@ -862,6 +869,18 @@ function downloadOrderModule(orderId) {
 
 const omRgb = (hex) => { const h = String(hex || '').replace('#', ''); return /^[0-9a-f]{6}$/i.test(h) ? [0, 2, 4].map(i => parseInt(h.substr(i, 2), 16)) : [34, 38, 44]; };
 
+// Indirizzo della pagina dell'ordine nel QR: sempre il gestionale pubblicato, anche se il PDF si fa in locale
+const SCHEDA_ORDINE_URL = 'https://cs.pngs.it/dashboard.html?ordine=';
+function schedaOrdineUrl(id) { return SCHEDA_ORDINE_URL + encodeURIComponent(id); }
+// Matrice del QR (libreria qrcode-generator); null se la libreria non si è caricata
+function omQr(text) {
+  if (typeof qrcode !== 'function') return null;
+  try {
+    const q = qrcode(0, 'M'); q.addData(text); q.make();
+    return { n: q.getModuleCount(), dark: (r, c) => q.isDark(r, c), svg: () => q.createSvgTag({ cellSize: 3, margin: 0, scalable: true }) };
+  } catch { return null; }
+}
+
 function _generatePDF(D) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -876,28 +895,46 @@ function _generatePDF(D) {
     for (; size > min; size -= 0.25) { doc.setFontSize(size); if (doc.getTextWidth(txt) <= maxW) return size; }
     doc.setFontSize(min); return min;
   };
-  // Lavorazioni: riquadro pieno nel colore della tipologia, in alto a destra, ben visibili
+  // QR dell'ordine nell'angolo in alto a destra: scansionato apre la pagina dell'ordine (fasi, modulo, bozze)
+  const qr = D.order ? omQr(schedaOrdineUrl(D.order.id)) : null;
+  const QR_S = 22, qrOff = qr ? QR_S + 4 : 0;
+  if (qr) {
+    const cell = QR_S / qr.n, x0 = pw - M - QR_S, y0 = 8;
+    doc.setFillColor(...INK);
+    for (let r = 0; r < qr.n; r++) {
+      for (let c = 0; c < qr.n; c++) {
+        if (!qr.dark(r, c)) continue;
+        let e = c; while (e + 1 < qr.n && qr.dark(r, e + 1)) e++;   // una striscia per riga: PDF leggero
+        doc.rect(x0 + c * cell, y0 + r * cell, (e - c + 1) * cell + 0.01, cell + 0.01, 'F');
+        c = e;
+      }
+    }
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(6); doc.setTextColor(...MUTED);
+    doc.text(`ORDINE ${D.order.id}`, x0 + QR_S / 2, y0 + QR_S + 3, { align: 'center' });
+  }
+  // Lavorazioni: riquadro pieno nel colore della tipologia, in alto a destra (a fianco del QR), ben visibili
   const lavParti = D.lavParti || [];
+  const R = pw - M - qrOff;   // bordo destro di lavorazioni e URGENTE
   let lavW = 0, lavBottom = 0;
   if (lavParti.length) {
-    const maxW = (pw - 2 * M) * 0.45, padX = 4, lh = 6.2, top = 9;
+    const maxW = (pw - 2 * M - qrOff) * 0.45, padX = 4, lh = 6.2, top = 9;
     doc.setFont('helvetica', 'bold');
     let fsL = 12;
     for (; fsL > 7; fsL -= 0.25) { doc.setFontSize(fsL); if (Math.max(...lavParti.map(t => doc.getTextWidth(t))) <= maxW - 2 * padX) break; }
     lavW = Math.max(34, Math.min(maxW, Math.max(...lavParti.map(t => doc.getTextWidth(t))) + 2 * padX));
     const bh = 7 + lh * lavParti.length;
-    doc.setFillColor(...C); doc.roundedRect(pw - M - lavW, top, lavW, bh, 2.5, 2.5, 'F');
-    doc.setTextColor(...FG); doc.setFontSize(6.5); doc.text('LAVORAZIONI', pw - M - lavW + padX, top + 4.6);
-    lavParti.forEach((t, i) => { fitSize(t, lavW - 2 * padX, fsL); doc.text(t, pw - M - lavW + padX, top + 4.6 + lh * (i + 1)); });
+    doc.setFillColor(...C); doc.roundedRect(R - lavW, top, lavW, bh, 2.5, 2.5, 'F');
+    doc.setTextColor(...FG); doc.setFontSize(6.5); doc.text('LAVORAZIONI', R - lavW + padX, top + 4.6);
+    lavParti.forEach((t, i) => { fitSize(t, lavW - 2 * padX, fsL); doc.text(t, R - lavW + padX, top + 4.6 + lh * (i + 1)); });
     lavBottom = top + bh;
   }
-  const leftW = pw - 2 * M - (lavW ? lavW + 6 : 0);
+  const leftW = pw - 2 * M - qrOff - (lavW ? lavW + 6 : 0);
   doc.setFont('helvetica', 'bold'); doc.setTextColor(...C);
   fitSize(D.tipologia.toUpperCase(), leftW - (D.isUrgent && !lavW ? 25 : 0), 24);
   doc.text(D.tipologia.toUpperCase(), M, 20);
   if (D.isUrgent) {
     doc.setFontSize(10); doc.setTextColor(...RED);
-    doc.text('URGENTE', pw - M, lavW ? lavBottom + 5 : 20, { align: 'right' });
+    doc.text('URGENTE', R, lavW ? lavBottom + 5 : 20, { align: 'right' });
   }
 
   // Cliente — descrizione
@@ -914,7 +951,7 @@ function _generatePDF(D) {
   doc.setFont('helvetica', 'normal'); doc.setTextColor(...MUTED); doc.text('Scadenza', M + 52, y);
   doc.setFont('helvetica', 'bold'); doc.setTextColor(...INK); doc.text(omDate(D.deadline), M + 68, y);
   y += 5;
-  y = Math.max(y, lavBottom + (D.isUrgent && lavW ? 8 : 3));
+  y = Math.max(y, lavBottom + (D.isUrgent && lavW ? 8 : 3), qr ? 8 + QR_S + 6 : 0);
 
   // Righe: barra di intestazione nel colore della tipologia
   const head = [['Fornitore','Codice','Descrizione','Colore','QNT','TG','Prezzo','Totale','Ord.','Lavorazione']];
@@ -1021,12 +1058,13 @@ td{padding:7px 10px;border-bottom:1px solid #E2E5EE;white-space:nowrap}tbody tr:
 .hd{display:flex;justify-content:space-between;align-items:flex-start;gap:20px}
 .lav{background:${D.colore};color:${D.inchiostro};border-radius:12px;padding:8px 14px;display:flex;flex-direction:column;gap:2px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .lav span{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;opacity:.85}.lav b{font-size:16px;font-weight:900;white-space:nowrap}
+.qr{width:84px;text-align:center}.qr svg{width:84px;height:84px;display:block}.qr span{font-size:8px;font-weight:800;color:#6F7686}
 @media print{body{margin:10px}}</style></head><body>
 <div class="hd"><div>
 <div class="tipo">${escapeHtml(D.tipologia)}${D.isUrgent ? '<span class="urg">URGENTE</span>' : ''}</div>
 <div class="cli">${escapeHtml(D.cliente)}${D.desc ? ` — ${escapeHtml(D.desc)}` : ''}</div>
 <div class="date"><span>Data ordine <b>${omDate(D.data)}</b></span><span>Scadenza <b>${omDate(D.deadline)}</b></span></div>
-</div>${(D.lavParti || []).length ? `<div class="lav"><span>Lavorazioni</span>${D.lavParti.map(t => `<b>${escapeHtml(t)}</b>`).join('')}</div>` : ''}</div>
+</div><div style="display:flex;gap:14px;align-items:flex-start">${(D.lavParti || []).length ? `<div class="lav"><span>Lavorazioni</span>${D.lavParti.map(t => `<b>${escapeHtml(t)}</b>`).join('')}</div>` : ''}${(() => { const q = D.order ? omQr(schedaOrdineUrl(D.order.id)) : null; return q ? `<div class="qr">${q.svg()}<span>ORDINE ${escapeHtml(D.order.id)}</span></div>` : ''; })()}</div></div>
 <table><thead><tr><th>Fornitore</th><th>Codice</th><th>Descrizione</th><th>Colore</th><th class="c">QNT</th><th class="c">TG</th><th class="r">Prezzo</th><th class="r">Totale</th><th class="c">Ord.</th><th>Lavorazione</th></tr></thead><tbody>${body}</tbody></table>
 <div class="tot"><div><span>Totale prodotti</span><strong>${omPezzi(D.pezzi)}</strong></div><div><span>Totale ordine</span><strong>${omEuro(D.total)}</strong></div><div><span>Acconto</span><strong>${omEuro(D.acconto)}</strong></div><div class="s"><span>Saldo</span><strong>${omEuro(D.total - D.acconto)}</strong></div></div>
 ${D.notes ? `<div class="nl">Note</div><div class="nt">${escapeHtml(D.notes)}</div>` : ''}
@@ -3218,6 +3256,7 @@ async function startApp() {
   MailBox.start();
   Salvaschermo.start();
   if (typeof DtfCartella !== 'undefined') DtfCartella.avvia();   // cartella DTF: controllo ogni 5 minuti
+  if (typeof SchedaOrdine !== 'undefined') SchedaOrdine.avvia(); // ?ordine=<id> dal QR del modulo, lettore di codici
 }
 
 async function doLogout() {

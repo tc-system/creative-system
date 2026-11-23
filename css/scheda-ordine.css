@@ -1,0 +1,91 @@
+/* Pagina dell'ordine aperta col QR del modulo (js/scheda-ordine.js): a tutto schermo, pensata per telefono e iPad.
+   Sotto i popup del gestionale (z-index 1000), sopra tutto il resto. */
+body.so-aperta { overflow: hidden; }
+.so {
+  position: fixed; inset: 0; z-index: 950;
+  display: flex; flex-direction: column;
+  background: var(--bg-primary); color: var(--text-primary);
+}
+.so-testa {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: max(14px, env(safe-area-inset-top)) 16px 14px;
+  background: var(--surface); border-bottom: 4px solid var(--om-c);
+}
+.so-intest { flex: 1; min-width: 0; }
+.so-tipo { font-size: 1.5rem; font-weight: 900; line-height: 1.05; color: var(--om-c); text-transform: uppercase; }
+.so-cliente { margin-top: 4px; font-size: 1.05rem; overflow-wrap: anywhere; }
+.so-cliente strong { font-weight: 800; }
+.so-cliente span { color: var(--text-secondary); }
+.so-date { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 6px; font-size: 0.85rem; color: var(--text-muted); }
+.so-date strong { color: var(--text-primary); }
+.so-date .is-late { color: #d62828; }
+.so-date .is-soon { color: #d97706; }
+.so-lav { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.so-lav span {
+  background: var(--om-c); color: var(--om-fg); border-radius: 999px; padding: 3px 10px;
+  font-size: 0.75rem; font-weight: 800; letter-spacing: 0.03em;
+}
+.so-chiudi { flex: none; width: 44px; height: 44px; }
+
+.so-corpo {
+  flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 16px 16px max(24px, env(safe-area-inset-bottom));
+  display: grid; gap: 16px; align-content: start;
+}
+.so-sez { background: var(--surface); border: 1px solid var(--border-light); border-radius: var(--radius-lg); padding: 14px 16px; min-width: 0; }
+.so-sez h3 { margin: 0 0 10px; font-size: 0.78rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
+.so-conta { display: inline-block; min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--bg-primary); color: var(--text-primary); text-align: center; }
+.so-vuoto, .so-nota { margin: 0; font-size: 0.88rem; color: var(--text-muted); overflow-wrap: anywhere; }
+.so-nota { margin-top: 8px; font-size: 0.78rem; }
+
+/* Fasi: pulsanti grandi per il dito */
+.so-gruppo + .so-gruppo { margin-top: 12px; }
+.so-gruppo-nome { font-size: 0.75rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 6px; }
+.so-fasi { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.so-fase {
+  display: grid; grid-template-columns: 26px 1fr; align-items: center; column-gap: 8px;
+  min-height: 60px; padding: 10px 16px; text-align: left;
+  border-radius: 999px; border: 2px solid var(--border); background: var(--surface); color: var(--text-primary);
+  font: inherit; cursor: pointer; touch-action: manipulation;
+}
+.so-fase-segno {
+  grid-row: span 2; width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--border);
+  display: grid; place-items: center; font-weight: 900; font-size: 0.9rem;
+}
+.so-fase-nome { font-weight: 800; font-size: 1rem; }
+.so-fase-data { grid-column: 2; font-size: 0.75rem; color: var(--text-muted); }
+.so-fase.is-fatto { border-color: #16a34a; background: color-mix(in srgb, #16a34a 14%, var(--surface)); }
+.so-fase.is-fatto .so-fase-segno { background: #16a34a; border-color: #16a34a; color: #fff; }
+.so-fase.is-mezzo { border-color: #eab308; background: color-mix(in srgb, #facc15 22%, var(--surface)); }
+.so-fase.is-mezzo .so-fase-segno { background: #facc15; border-color: #eab308; color: #422006; }
+.so-fase:disabled { opacity: 0.55; cursor: not-allowed; }
+.so-fase:not(:disabled):active { transform: scale(0.98); }
+
+/* Bozze */
+.so-bozze { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.so-bozza {
+  display: flex; flex-direction: column; gap: 6px; min-width: 0;
+  color: inherit; text-decoration: none;
+}
+.so-bozza img, .so-bozza-pdf {
+  width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: var(--radius-md);
+  background: var(--bg-primary); border: 1px solid var(--border-light);
+}
+.so-bozza-pdf { display: grid; place-items: center; font-weight: 900; font-size: 1.3rem; color: #d62828; }
+.so-bozza-nome { font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.so-allegati { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
+.so-allegati .so-gruppo-nome { width: 100%; margin: 0; }
+
+/* Modulo: tabella che scorre di lato, righe alte per il dito */
+.so-modulo { padding-left: 0; padding-right: 0; }
+.so-modulo h3, .so-modulo .so-vuoto { padding: 0 16px; }
+.so-modulo .om-table td { padding-top: 11px; padding-bottom: 11px; }
+.so-modulo .mod-preview-check, .so-modulo .mod-preview-notebtn { min-width: 30px; min-height: 30px; }
+.so-modulo .om-tot, .so-modulo .om-note { margin-left: 16px; margin-right: 16px; }
+.so-modulo .mod-preview-note input { font-size: 16px; }   /* iPhone/iPad: niente zoom sul campo */
+
+@media (min-width: 900px) {
+  .so-corpo { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); padding: 20px 24px; }
+  .so-modulo { grid-column: 1 / -1; }
+  .so-tipo { font-size: 1.9rem; }
+}
