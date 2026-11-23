@@ -654,7 +654,7 @@ function assistNumeriParlati(testo) {
 
 function assistMic() {
   if (AssistState.ascolto) { AssistState.ascolto.stop(); return; }
-  window.speechSynthesis?.cancel();
+  assistZitto();
   const rec = new ASSIST_SR();
   rec.lang = 'it-IT';
   rec.interimResults = true;
@@ -686,18 +686,39 @@ function assistMic() {
 }
 
 // Legge la risposta: le frasi, non gli elenchi completi
-function assistParla(html) {
-  if (!window.speechSynthesis) return;
+// Legge la risposta: le frasi, non gli elenchi completi.
+// Prima la voce di Google (funzione voce, se la chiave è impostata), altrimenti quella del browser.
+async function assistParla(html) {
   const box = document.createElement('div');
   box.innerHTML = html;
-  const frasi = [...box.querySelectorAll('p, .assist-card > span')].map(n => n.textContent.trim()).filter(Boolean);
-  if (!frasi.length) return;
-  const u = new SpeechSynthesisUtterance(frasi.join(' ').replace(/:\s*$/, '.'));
+  const testo = [...box.querySelectorAll('p, .assist-card > span')].map(n => n.textContent.trim()).filter(Boolean)
+    .join(' ').replace(/:\s*$/, '.');
+  if (!testo) return;
+  assistZitto();
+  if (AssistState.voceGoogle !== false) {
+    try {
+      const { data, error } = await supabaseClient.functions.invoke('voce', { body: { testo } });
+      if (!error && data?.audio) {
+        AssistState.voceGoogle = true;
+        AssistState.audio = new Audio('data:audio/mp3;base64,' + data.audio);
+        await AssistState.audio.play();
+        return;
+      }
+      // Voce Google non attivata: per questa sessione si usa direttamente quella del browser
+      if (error?.context?.status === 503) AssistState.voceGoogle = false;
+    } catch {}
+  }
+  if (!window.speechSynthesis) return;
+  const u = new SpeechSynthesisUtterance(testo);
   u.lang = 'it-IT';
   const voce = speechSynthesis.getVoices().find(v => v.lang?.startsWith('it'));
   if (voce) u.voice = voce;
-  speechSynthesis.cancel();
   speechSynthesis.speak(u);
+}
+
+function assistZitto() {
+  window.speechSynthesis?.cancel();
+  if (AssistState.audio) { AssistState.audio.pause(); AssistState.audio = null; }
 }
 
 // Ctrl+K / Cmd+K apre l'assistente da qualsiasi pagina
