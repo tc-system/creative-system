@@ -2065,3 +2065,18 @@ html.dark .report-day { color: #fdba74; }
   background: #fff; color: #6F7686; text-decoration: none; font-size: 0.62rem; font-weight: 800; letter-spacing: 0.04em; }
 .om-qr svg { width: 84px; height: 84px; display: block; }
 .om-qr svg path, .om-qr svg rect { shape-rendering: crispEdges; }
+
+/* Merce arrivata, riga per riga: prima colonna, tonda e verde col pacco (la spunta gialla della lavorazione è quadrata) */
+.om-table .om-arr { width: 1%; padding: 6px 4px 6px 12px; text-align: center; white-space: nowrap; }
+.om-table th.om-arr { font-size: inherit; }
+.mod-arr {
+  display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; vertical-align: middle;
+  border-radius: 50%; border: 2px dashed var(--border); background: transparent; color: var(--text-muted);
+  cursor: pointer; touch-action: manipulation;
+}
+.mod-arr:hover { border-color: #16a34a; color: #16a34a; }
+.mod-arr.is-on { border: 2px solid #16a34a; background: #16a34a; color: #fff; }
+.mod-arr-data { display: block; margin-top: 2px; font-size: 0.66rem; font-weight: 700; color: #16a34a; line-height: 1; }
+.mod-arr-data:empty { display: none; }
+.mod-table .mod-arr { width: 26px; height: 26px; }
+.om-table .mod-arr, .mod-table .mod-arr, .so .mod-arr { border-radius: 50% !important; corner-shape: round !important; }

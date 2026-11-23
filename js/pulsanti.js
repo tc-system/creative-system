@@ -245,13 +245,19 @@ const Pulsanti = {
     if (sid) { const st = o.stages?.[sid]; v = st?.done ? (st.date || true) : null; }
     else { const l = this.link(p); v = lavTipoDone(o, l.kind, l.id); }
     const m = !v && this.haMezzo(p) ? o.stages?.[this.mezzoKey(p)] : null;
-    return { done: !!v, date: typeof v === 'string' ? v : null, mezzo: !!m, mezzoDate: m?.date || null };
+    // Merce: arrivate solo alcune righe del modulo → PARZIALE (giallo), con il giorno dell'ultimo arrivo
+    const arr = !v && sid === 'merceCompleta' && typeof merceArrivo === 'function' ? merceArrivo(o) : null;
+    const parziale = !!arr && arr.arrivate > 0 && arr.arrivate < arr.tot;
+    return { done: !!v, date: typeof v === 'string' ? v : null, mezzo: !!m || parziale, parziale,
+             mezzoDate: m?.date || (parziale && arr.ultima ? localISODate(new Date(arr.ultima)) : null),
+             arrivo: parziale ? `${arr.arrivate} di ${arr.tot} righe arrivate` : '' };
   },
   // Pulsante con il passaggio intermedio giallo: se ha un nome, o se è una lavorazione esterna
   haMezzo(p) { return !!p.intermedio || this.link(p)?.kind === 'esterne'; },
   // Passaggio intermedio (giallo) del pulsante, salvato tra le fasi dell'ordine
   mezzoKey(p) { return `mezzo:${p.id}`; },
   etichetta(o, p) {
+    if (this.stato(o, p).parziale) return 'PARZIALE';
     if (p.intermedio) { const st = this.stato(o, p); if (st.mezzo || st.done) return p.intermedio; }
     const cond = p.alt?.nome && p.alt.seNon ? this.get(p.alt.seNon) : null;
     return cond && this.visibile(o, cond) && !this.stato(o, cond).done ? p.alt.nome : this.nome(p);
@@ -375,7 +381,7 @@ function pulsantiPills(o, colonna, filtro = () => true) {
     return `<div class="stage-cell">
       <button class="stage-pill ${st.done ? 'done' : ''} ${st.mezzo ? 'mezzo' : ''} ${locked ? 'locked' : ''}"
         onclick="event.stopPropagation();${locked ? '' : `pulsanteToggle('${o.id}','${escapeHtml(p.id)}',${!st.done})`}" ${locked ? 'aria-disabled="true"' : ''}
-        title="${escapeHtml(locked ? Pulsanti.motivo(p) : Pulsanti.nome(p) + (st.done ? ' — fatto' : st.mezzo ? ` — ${p.intermedio || 'in corso'}: clic per segnarlo fatto` : ''))}">${escapeHtml(Pulsanti.etichetta(o, p))}</button>
+        title="${escapeHtml(locked ? Pulsanti.motivo(p) : Pulsanti.nome(p) + (st.done ? ' — fatto' : st.parziale ? ` — ${st.arrivo}: clic per segnarla completa` : st.mezzo ? ` — ${p.intermedio || 'in corso'}: clic per segnarlo fatto` : ''))}">${escapeHtml(Pulsanti.etichetta(o, p))}</button>
       <span class="pill-date">${(st.date || st.mezzoDate) ? TCFactory.formatDate(st.date || st.mezzoDate, { day: '2-digit', month: '2-digit' }) : ''}</span>
     </div>`;
   }).join('');

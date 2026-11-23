@@ -561,6 +561,59 @@ const modGroup = (r) => r?.integrazione === true ? 1 : (parseInt(r?.integrazione
 const isPrevRow = (r) => !!r?.preventivo;
 const prevGroupsOf = (rows) => [...new Set((rows || []).filter(isPrevRow).map(modGroup))];
 const orderRows = (rows) => (rows || []).filter(r => !isPrevRow(r));        // righe da ordinare
+
+// ── Merce arrivata, riga per riga (richiesta Riccardo 2026-11-23) ──
+// rows[i].arrivo = { at: ISO, da: nickname }: quando e chi l'ha segnata. Tutte le righe da ordinare arrivate →
+// la fase Merce ("C") si spunta da sola; solo alcune → Merce risulta PARZIALE; se se ne toglie una torna da fare.
+// La colonna è la prima della riga, tonda e verde col pacco: non si confonde con la spunta gialla della lavorazione.
+function merceArrivo(o) {
+  const righe = orderRows(o?.orderModule?.rows);
+  const arrivate = righe.filter(r => r.arrivo);
+  const ultima = arrivate.map(r => r.arrivo.at).filter(Boolean).sort().pop() || null;
+  return { tot: righe.length, arrivate: arrivate.length, ultima };
+}
+const arrivoTesto = (a) => a ? `Arrivato il ${new Date(a.at).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}${a.da ? ' · ' + a.da : ''}` : '';
+const arrivoBreve = (a) => a?.at ? new Date(a.at).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }) : '';
+// Fase Merce allineata alle righe: fatta se sono arrivate tutte, da fare se ne manca anche una.
+// Dal form (dopoRiga false) solo se qualche riga è segnata: gli ordini con Merce spuntata a mano restano com'erano.
+async function syncMerceArrivo(orderId, dopoRiga = false) {
+  const o = TCFactory.getOrderById(orderId);
+  const p = typeof Pulsanti !== 'undefined' ? Pulsanti.byStage('merceCompleta') : null;
+  if (!o || !p) return;
+  const { tot, arrivate } = merceArrivo(o);
+  if (!tot || (!arrivate && !dopoRiga)) return;
+  const tutte = arrivate === tot;
+  if (Pulsanti.stato(o, p).done !== tutte) await Pulsanti.set(orderId, p, tutte);
+}
+async function toggleModArrivo(orderId, idx, btn) {
+  const order = TCFactory.getOrderById(orderId);
+  const rows = [...(order?.orderModule?.rows || [])];
+  if (!rows[idx] || isPrevRow(rows[idx])) return;
+  const r = { ...rows[idx] };
+  if (r.arrivo) delete r.arrivo;
+  else r.arrivo = { at: new Date().toISOString(), da: TCAuth.getNickname() };
+  rows[idx] = r;
+  try {
+    await TCFactory.updateOrder(orderId, { orderModule: { ...order.orderModule, rows } });
+    await syncMerceArrivo(orderId, true);
+  } catch (e) { console.error('[arrivo]', e); showToast('Arrivo non salvato — riprova', 'error'); return; }
+  if (btn) {
+    btn.classList.toggle('is-on', !!r.arrivo);
+    btn.title = r.arrivo ? arrivoTesto(r.arrivo) + ' — clic per toglierlo' : 'Segna arrivato';
+    const d = btn.parentElement?.querySelector('.mod-arr-data');
+    if (d) d.textContent = arrivoBreve(r.arrivo);
+  }
+  const { tot, arrivate } = merceArrivo(TCFactory.getOrderById(orderId));
+  showToast(r.arrivo ? (arrivate === tot ? 'Merce arrivata tutta: C ✓' : `Arrivato · ${arrivate} di ${tot} righe`) : 'Arrivo tolto');
+  renderApp();
+}
+function modArrivoCella(orderId, idx, r) {
+  if (isPrevRow(r)) return '<td class="om-arr"></td>';
+  const on = !!r.arrivo;
+  return `<td class="om-arr"><button type="button" class="mod-arr ${on ? 'is-on' : ''}" aria-label="Merce arrivata"
+      title="${escapeHtml(on ? arrivoTesto(r.arrivo) + ' — clic per toglierlo' : 'Segna arrivato')}"
+      onclick="event.stopPropagation();toggleModArrivo('${orderId}',${idx},this)">${Icons.package(14)}</button><span class="mod-arr-data">${arrivoBreve(r.arrivo)}</span></td>`;
+}
 const rowsTotal = (rows) => (rows || []).reduce((s, r) => s + (parseFloat(r.qnt)||0)*(parseFloat(r.prezzo)||0), 0);
 const orderPrevCount = (o) => prevGroupsOf(o?.orderModule?.rows).length;
 
@@ -698,6 +751,7 @@ function omCorpoHtml(D, { approva = true } = {}) {
     const idx = rows.indexOf(r);
     const c   = checks[idx] || {};
     return `<tr class="mod-preview-row ${c.s ? 'is-checked' : ''} ${isPrevRow(r) ? 'is-prev' : ''}" onclick="toggleModPreviewRow('${order.id}',${idx},this)">
+      ${modArrivoCella(order.id, idx, r)}
       <td class="om-tools"><button type="button" class="mod-preview-check" aria-label="Evidenzia riga in giallo" title="Evidenzia in giallo" onclick="event.stopPropagation();toggleModPreviewRow('${order.id}',${idx},this.closest('tr'))"></button><button type="button" class="mod-preview-notebtn ${c.n ? 'has-note' : ''}" aria-label="Nota sulla riga" title="Nota sulla riga" onclick="event.stopPropagation();toggleModPreviewNote('${order.id}',${idx},this.closest('tr'))">${Icons.edit(12)}</button></td>
       <td class="om-strong">${escapeHtml(r.catalogo||'')}</td>
       <td>${escapeHtml(r.codice||'')}</td>
@@ -711,22 +765,22 @@ function omCorpoHtml(D, { approva = true } = {}) {
       <td class="om-strong">${escapeHtml(modRowLav(r))}</td>
     </tr>${c.n ? modPreviewNoteRow(order.id, idx, c.n) : ''}`;
   };
-  const integHeaderRow = (label) => `<tr><td colspan="11" class="om-integ">${escapeHtml(label)}</td></tr>`;
+  const integHeaderRow = (label) => `<tr><td colspan="12" class="om-integ">${escapeHtml(label)}</td></tr>`;
   // Preventivo: intestazione ambra con il totale e il pulsante per approvarlo
-  const prevHeaderRow = (m) => `<tr><td colspan="11" class="mod-prev-head">
+  const prevHeaderRow = (m) => `<tr><td colspan="12" class="mod-prev-head">
       <div><strong>${escapeHtml(m.label)}</strong> · da approvare — non ordinare · Totale ${omEuro(rowsTotal(m.rows))}</div>
       ${approva ? `<button type="button" class="btn btn-sm mod-prev-approve" onclick="event.stopPropagation();approvePreventivo('${order.id}',${m.g})">✓ Approva</button>` : ''}
     </td></tr>`;
   const groups = moduleGroups(rows);
   const rowsHtml = rows.length
     ? groups.map((m, k) => (m.prev ? prevHeaderRow(m) : k ? integHeaderRow(m.label) : '') + m.rows.map(renderModRow).join('')).join('')
-    : `<tr><td colspan="11" class="om-empty">Nessuna riga</td></tr>`;
+    : `<tr><td colspan="12" class="om-empty">Nessuna riga</td></tr>`;
 
   const th = (txt, cls = '') => `<th class="${cls}">${txt}</th>`;
   return `
         <div class="om-scroll">
           <table class="om-table">
-            <thead><tr>${th('', 'om-tools')}${th('Fornitore')}${th('Codice')}${th('Descrizione')}${th('Colore')}${th('QNT', 'om-c')}${th('TG', 'om-c')}${th('Prezzo', 'om-r')}${th('Totale', 'om-r')}${th('Ord.', 'om-c')}${th('Lavorazione')}</tr></thead>
+            <thead><tr>${th('Arr.', 'om-arr')}${th('', 'om-tools')}${th('Fornitore')}${th('Codice')}${th('Descrizione')}${th('Colore')}${th('QNT', 'om-c')}${th('TG', 'om-c')}${th('Prezzo', 'om-r')}${th('Totale', 'om-r')}${th('Ord.', 'om-c')}${th('Lavorazione')}</tr></thead>
             <tbody>${rowsHtml}</tbody>
           </table>
         </div>
@@ -820,7 +874,7 @@ function saveModPreviewCheck(orderId, idx, c, delay = 0) {
   }, delay);
 }
 function modPreviewNoteRow(orderId, idx, nota) {
-  return `<tr class="mod-preview-note"><td></td><td colspan="10" style="padding:0 10px 9px;">
+  return `<tr class="mod-preview-note"><td></td><td></td><td colspan="10" style="padding:0 10px 9px;">
     <input class="form-input" placeholder="Nota sulla riga…" aria-label="Nota sulla riga" value="${escapeHtml(nota || '')}"
       oninput="setModPreviewNote('${orderId}',${idx},this.value)"></td></tr>`;
 }
@@ -957,10 +1011,11 @@ function _generatePDF(D) {
   y = Math.max(y, lavBottom + (D.isUrgent && lavW ? 8 : 3), qr ? 8 + QR_S + 6 : 0);
 
   // Righe: barra di intestazione nel colore della tipologia
-  const head = [['Fornitore','Codice','Descrizione','Colore','QNT','TG','Prezzo','Totale','Ord.','Lavorazione']];
+  // Prima colonna: merce arrivata (SI + giorno), come nel gestionale
+  const head = [['Arr.','Fornitore','Codice','Descrizione','Colore','QNT','TG','Prezzo','Totale','Ord.','Lavorazione']];
   const rowToArr = r => {
     const t = (parseFloat(r.qnt)||0)*(parseFloat(r.prezzo)||0);
-    return [r.catalogo||'', r.codice||'', r.descrizione||'', r.colore||'', r.qnt||'', r.tg||'',
+    return [!isPrevRow(r) && r.arrivo ? `SI ${arrivoBreve(r.arrivo)}` : '', r.catalogo||'', r.codice||'', r.descrizione||'', r.colore||'', r.qnt||'', r.tg||'',
       r.prezzo ? omEuro(r.prezzo) : '', t > 0 ? omEuro(t) : '', isPrevRow(r) ? 'NO' : r.ordinato ? 'SI' : '', modRowLav(r)];
   };
   // Colonne larghe quanto il loro testo più lungo (stesse larghezze per modulo, integrazioni e
@@ -968,7 +1023,7 @@ function _generatePDF(D) {
   // carattere: le celle non vanno MAI a capo.
   const groups = moduleGroups(D.rows);
   const bodyAll = D.rows.map(rowToArr);
-  const boldCol = [0, 7], PAD = 1.6, avail = pw - 2 * M;
+  const boldCol = [1, 8], PAD = 1.6, avail = pw - 2 * M;
   const misura = (fs) => head[0].map((h, c) => {
     doc.setFont('helvetica', 'bold'); doc.setFontSize(Math.max(fs - 1, 5));
     let w = doc.getTextWidth(h);
@@ -980,8 +1035,8 @@ function _generatePDF(D) {
   while (fs > 5 && widths.reduce((a, b) => a + b, 0) > avail) { fs -= 0.25; widths = misura(fs); }
   // Spazio avanzato a Descrizione e Lavorazione
   const extra = avail - widths.reduce((a, b) => a + b, 0);
-  if (extra > 0) { widths[2] += extra * 0.6; widths[9] += extra * 0.4; }
-  const halign = { 4: 'center', 5: 'center', 6: 'right', 7: 'right', 8: 'center' };
+  if (extra > 0) { widths[3] += extra * 0.6; widths[10] += extra * 0.4; }
+  const halign = { 0: 'center', 5: 'center', 6: 'center', 7: 'right', 8: 'right', 9: 'center' };
   const base = {
     margin: { left: M, right: M }, tableWidth: avail,
     styles: { font: 'helvetica', fontSize: fs, cellPadding: { top: 2, bottom: 2, left: PAD, right: PAD }, overflow: 'ellipsize',
@@ -993,7 +1048,7 @@ function _generatePDF(D) {
   let fy = y + 1;
   const ensure = (h) => { if (fy + h > ph - 12) { doc.addPage(); fy = 15; } };
   if (!groups.length) {
-    doc.autoTable({ ...base, startY: fy, head, body: [['','','','','','','','','','']] });
+    doc.autoTable({ ...base, startY: fy, head, body: [['','','','','','','','','','','']] });
     fy = doc.lastAutoTable.finalY + 6;
   }
   groups.forEach((m, k) => {
@@ -1040,12 +1095,12 @@ function _generatePDF(D) {
 
 // Riserva se jsPDF non si carica: stessa struttura, stampata dal browser
 function _generatePrintPreview(D) {
-  const rowHtml = r => { const t=(parseFloat(r.qnt)||0)*(parseFloat(r.prezzo)||0); return `<tr><td><strong>${escapeHtml(r.catalogo||'')}</strong></td><td>${escapeHtml(r.codice||'')}</td><td>${escapeHtml(r.descrizione||'')}</td><td>${escapeHtml(r.colore||'')}</td><td class="c">${escapeHtml(String(r.qnt||''))}</td><td class="c">${escapeHtml(r.tg||'')}</td><td class="r">${r.prezzo?omEuro(r.prezzo):''}</td><td class="r"><strong>${t>0?omEuro(t):''}</strong></td><td class="c">${isPrevRow(r)?'NO':r.ordinato?'✓':''}</td><td>${escapeHtml(modRowLav(r))}</td></tr>`; };
+  const rowHtml = r => { const t=(parseFloat(r.qnt)||0)*(parseFloat(r.prezzo)||0); return `<tr><td class="c">${!isPrevRow(r) && r.arrivo ? 'SI ' + arrivoBreve(r.arrivo) : ''}</td><td><strong>${escapeHtml(r.catalogo||'')}</strong></td><td>${escapeHtml(r.codice||'')}</td><td>${escapeHtml(r.descrizione||'')}</td><td>${escapeHtml(r.colore||'')}</td><td class="c">${escapeHtml(String(r.qnt||''))}</td><td class="c">${escapeHtml(r.tg||'')}</td><td class="r">${r.prezzo?omEuro(r.prezzo):''}</td><td class="r"><strong>${t>0?omEuro(t):''}</strong></td><td class="c">${isPrevRow(r)?'NO':r.ordinato?'✓':''}</td><td>${escapeHtml(modRowLav(r))}</td></tr>`; };
   const groups = moduleGroups(D.rows);
   const body = D.rows.length ? groups.map((m, k) => (m.prev || k
-      ? `<tr><td colspan="10" class="sez${m.prev ? ' prev' : ''}">${escapeHtml(m.label)}${m.prev ? ` — da approvare, non ordinare · Totale ${omEuro(rowsTotal(m.rows))} (fuori dal totale ordine)` : ''}</td></tr>` : '')
+      ? `<tr><td colspan="11" class="sez${m.prev ? ' prev' : ''}">${escapeHtml(m.label)}${m.prev ? ` — da approvare, non ordinare · Totale ${omEuro(rowsTotal(m.rows))} (fuori dal totale ordine)` : ''}</td></tr>` : '')
       + m.rows.map(rowHtml).join('')).join('')
-    : '<tr><td colspan="10" class="c" style="color:#6F7686;padding:20px">Nessuna riga</td></tr>';
+    : '<tr><td colspan="11" class="c" style="color:#6F7686;padding:20px">Nessuna riga</td></tr>';
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Modulo - ${escapeHtml(D.cliente)}</title>
 <style>body{font-family:Nunito,'Segoe UI',Arial,sans-serif;margin:24px;color:#22262C}
 .tipo{font-size:15px;font-weight:900;color:${D.colore};text-transform:uppercase;line-height:1.1}
@@ -1068,7 +1123,7 @@ td{padding:7px 10px;border-bottom:1px solid #E2E5EE;white-space:nowrap}tbody tr:
 <div class="cli">${escapeHtml(D.cliente)}${D.desc ? ` — ${escapeHtml(D.desc)}` : ''}</div>
 <div class="date"><span>Data ordine <b>${omDate(D.data)}</b></span><span>Scadenza <b>${omDate(D.deadline)}</b></span></div>
 </div><div style="display:flex;gap:14px;align-items:flex-start">${(D.lavParti || []).length ? `<div class="lav"><span>Lavorazioni</span>${D.lavParti.map(t => `<b>${escapeHtml(t)}</b>`).join('')}</div>` : ''}${(() => { const q = D.qrId ? omQr(schedaOrdineUrl(D.qrId)) : null; return q ? `<div class="qr">${q.svg()}<span>${escapeHtml(D.qrId)}</span></div>` : ''; })()}</div></div>
-<table><thead><tr><th>Fornitore</th><th>Codice</th><th>Descrizione</th><th>Colore</th><th class="c">QNT</th><th class="c">TG</th><th class="r">Prezzo</th><th class="r">Totale</th><th class="c">Ord.</th><th>Lavorazione</th></tr></thead><tbody>${body}</tbody></table>
+<table><thead><tr><th class="c">Arr.</th><th>Fornitore</th><th>Codice</th><th>Descrizione</th><th>Colore</th><th class="c">QNT</th><th class="c">TG</th><th class="r">Prezzo</th><th class="r">Totale</th><th class="c">Ord.</th><th>Lavorazione</th></tr></thead><tbody>${body}</tbody></table>
 <div class="tot"><div><span>Totale prodotti</span><strong>${omPezzi(D.pezzi)}</strong></div><div><span>Totale ordine</span><strong>${omEuro(D.total)}</strong></div><div><span>Acconto</span><strong>${omEuro(D.acconto)}</strong></div><div class="s"><span>Saldo</span><strong>${omEuro(D.total - D.acconto)}</strong></div></div>
 ${D.notes ? `<div class="nl">Note</div><div class="nt">${escapeHtml(D.notes)}</div>` : ''}
 <script>window.onload=()=>window.print()<\/script></body></html>`;
@@ -1517,9 +1572,10 @@ function modPanelHtml(g) {
           <table class="mod-table" style="width:100%;table-layout:fixed;">
             <thead>
               <tr>
+                <th style="width:4%;text-align:center;" title="Merce arrivata">ARR.</th>
                 <th style="width:10%;">CATALOGO</th>
                 <th style="width:8%;">CODICE</th>
-                <th style="width:12%;">DESCRIZIONE</th>
+                <th style="width:10%;">DESCRIZIONE</th>
                 <th style="width:8%;">COLORE</th>
                 <th style="width:6%;">QNT</th>
                 <th style="width:5%;">TG</th>
@@ -1527,7 +1583,7 @@ function modPanelHtml(g) {
                 <th style="width:8%;">TOTALE</th>
                 <th style="width:5%;text-align:center;">ORD.</th>
                 <th style="width:10%;" title="Lavorazione interna">INTERNA</th>
-                <th style="width:10%;" title="Lavorazione esterna">ESTERNA</th>
+                <th style="width:8%;" title="Lavorazione esterna">ESTERNA</th>
                 <th style="width:5%;text-align:center;">NEUTRO</th>
                 <th style="width:5%;"></th>
               </tr>
@@ -1844,7 +1900,10 @@ function renderModuleRows() {
   const rowHtml = (r, i) => {
     const tot = (parseFloat(r.qnt)||0) * (parseFloat(r.prezzo)||0);
     const prod = modProductByCode(r.codice);
+    const prevRiga = AppState.formPrevGroups.includes(modGroup(r));
     return `<tr>
+      <td style="text-align:center;">${prevRiga ? '' : `<button type="button" class="mod-arr ${r.arrivo ? 'is-on' : ''}" aria-label="Merce arrivata"
+        title="${escapeHtml(r.arrivo ? arrivoTesto(r.arrivo) + ' — clic per toglierlo' : 'Segna arrivato')}" onclick="storeModArrivo(${i},this)">${Icons.package(13)}</button>`}</td>
       <td><input class="mod-input" value="${escapeHtml(r.catalogo||'')}" oninput="storeMod(${i},'catalogo',this.value)"></td>
       <td><input id="mod-codice-${i}" class="mod-input" list="mod-prod-list" autocomplete="off" value="${escapeHtml(r.codice||'')}" oninput="modCodiceInput(${i},this.value)"></td>
       <td><input class="mod-input" value="${escapeHtml(r.descrizione||'')}" oninput="storeMod(${i},'descrizione',this.value)"></td>
@@ -2086,6 +2145,7 @@ function modCodiceInput(i, value) {
 function copyModRow(i) {
   const row = { ...AppState.formModuleRows[i] };
   delete row.spunta;   // la copia parte senza evidenziazione
+  delete row.arrivo;   // e non ancora arrivata
   AppState.formModuleRows.splice(i + 1, 0, row);
   renderModuleRows();
 }
@@ -2094,6 +2154,14 @@ function storeMod(i, field, value) {
   if (!AppState.formModuleRows[i]) return;
   const textFields = ['catalogo','codice','descrizione','colore','tg'];
   AppState.formModuleRows[i][field] = textFields.includes(field) ? value : (['ordinato','lavEsterna','neutro'].includes(field) ? value : (parseFloat(value) || ''));
+}
+// Arrivo dal form: si salva con l'ordine (con data e chi), poi la fase Merce si allinea (syncMerceArrivo)
+function storeModArrivo(i, btn) {
+  const r = AppState.formModuleRows[i];
+  if (!r) return;
+  if (r.arrivo) delete r.arrivo; else r.arrivo = { at: new Date().toISOString(), da: TCAuth.getNickname() };
+  btn.classList.toggle('is-on', !!r.arrivo);
+  btn.title = r.arrivo ? arrivoTesto(r.arrivo) + ' — clic per toglierlo' : 'Segna arrivato';
 }
 function calcModRow(i) {
   const r = AppState.formModuleRows[i] || {};
@@ -2417,6 +2485,7 @@ async function submitOrderForm() {
     }
     saved = true;
     ofPendingFromPhoto(payload.orderModule.rows, orderId);
+    syncMerceArrivo(orderId).catch(e => console.error('[arrivo]', e));
   } catch(e) {
     console.error('[submit]', e);
     showToast('Ordine non salvato: ' + ofSaveErrorText(e), 'error');
