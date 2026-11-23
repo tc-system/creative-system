@@ -8,6 +8,9 @@
 //       anche dentro prova-server/
 //   { chiave, azione: 'libreria' } → elenco della libreria DTF (bucket dtf-libreria) con peso, data e link
 //       per scaricarla: la usa il server del mattino, che non ha la cartella del Mac in sede (sql/dtf-libreria.sql)
+//   { chiave, azione: 'bozze-carica', percorsi: ['00411/ab12cd34-fronte.jpg', ...] } → link di caricamento nel bucket
+//       bozze (bozze degli ordini dal NAS, automazioni/dtf-cartella/bozze_nas.py, sql/bozze-ordini.sql)
+//   { chiave, azione: 'bozze-togli', percorsi } → cancella quelle bozze (ordine chiuso o file tolto dal NAS)
 // I file finiscono nel bucket privato file-mattino; la scheda "File del mattino" li elenca (sql/file-mattino.sql).
 // Nelle mattine di prova il server carica in prova-server/AAAA-MM-GG/...: la scheda non le mostra.
 //
@@ -21,6 +24,9 @@ const PROVA = 'prova-server';
 const GIORNO = /^\d{4}-\d{2}-\d{2}$/;
 // Cartella del giorno (anche dentro prova-server/), al massimo una sottocartella (fogli DTF), niente percorsi strani
 const PERCORSO = /^(?:prova-server\/)?\d{4}-\d{2}-\d{2}\/(?:[^/]+\/)?[^/]+$/;
+// Bozze: <id ordine>/<nome pulito>, solo lettere, numeri, punto, trattino e trattino basso
+const BOZZE = 'bozze';
+const PERCORSO_BOZZA = /^[A-Za-z0-9_-]{1,40}\/[A-Za-z0-9._-]{1,180}$/;
 
 const reply = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -120,6 +126,26 @@ Deno.serve(async (req) => {
     } catch (e) {
       return fail((e as Error).message, 500);
     }
+  }
+
+  if (body.azione === 'bozze-carica' || body.azione === 'bozze-togli') {
+    const percorsi = Array.isArray(body.percorsi) ? body.percorsi : [];
+    if (!percorsi.length || percorsi.length > 500) return fail('Percorsi mancanti');
+    for (const p of percorsi) {
+      if (typeof p !== 'string' || !PERCORSO_BOZZA.test(p) || p.includes('..')) return fail(`Percorso non valido: ${p}`);
+    }
+    if (body.azione === 'bozze-togli') {
+      const { error } = await db.storage.from(BOZZE).remove(percorsi as string[]);
+      if (error) return fail(error.message, 500);
+      return reply({ success: true });
+    }
+    const link: Record<string, string> = {};
+    for (const p of percorsi as string[]) {
+      const { data, error } = await db.storage.from(BOZZE).createSignedUploadUrl(p, { upsert: true });
+      if (error) return fail(`${p}: ${error.message}`, 500);
+      link[p] = data.signedUrl;
+    }
+    return reply({ success: true, link });
   }
 
   return fail('Azione sconosciuta');

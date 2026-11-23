@@ -118,3 +118,15 @@ rifiuta (`dtf_prepara_riscontro`); lo script copia solo le approvate. Riscontro:
 la pagina mostra la precisione sugli ultimi 10. Pezzi proposti: quelli scritti nel nome del file, altrimenti il
 totale capi. Una sottocartella col numero d'ordine (es. `2026/dtf/00404 felpe`) ha la precedenza sul resto.
 `sql/dtf-prepara-prova.sql`.
+
+## Bozze degli ordini → pagina dell'ordine (QR del modulo)
+
+`bozze_nas.py` gira ogni **5 minuti** sul Mac mini (crontab di csauto, `bozze.log`), con la stessa
+configurazione e lo stesso NAS di `dtf_cartella.py`. Per ogni ordine aperto del gestionale (non evaso,
+non archiviato, non eliminato) cerca la cartella del cliente come per i DTF e, nell'**anno corrente**, la
+cartella **bozze** (prima `<anno>/<lavorazione>/bozze`, lavorazione = descrizione dell'ordine, poi
+`<anno>/bozze`). Immagini e PDF (anche in sottocartelle, max 80 per ordine e 50 MB per file) vanno nel bucket
+privato `bozze` (link di caricamento dalla funzione `file-mattino`, azioni `bozze-carica`/`bozze-togli`) e in
+`ordini_bozze`; file tolti dal NAS e ordini chiusi → tolti dal gestionale. Sul NAS solo lettura. Se il NAS non è
+collegato non fa niente. Prova: `python3 -I bozze_nas.py --prova [--ordine 00411]`. Database: `sql/bozze-ordini.sql`.
+Crontab: `*/5 * * * * cd "$HOME/Library/Application Support/TC DTF" && /usr/bin/python3 -I bozze_nas.py >> bozze.log 2>&1`
