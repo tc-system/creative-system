@@ -213,7 +213,7 @@ async function assistRispondi(domanda) {
 
   // Nient'altro riconosciuto: si prova come ricerca di un ordine o di un cliente
   if (assistCercaOrdini(n).length) return assistOrdini(n);
-  return { html: `<p>Non ho capito. So creare promemoria e rispondere sugli ordini, ad esempio:</p>${assistEsempiHtml()}` };
+  return { html: `<p>Non ho capito. So creare promemoria e rispondere sugli ordini, ad esempio:</p>${assistEsempiHtml()}`, capito: false };
 }
 
 // ── Promemoria ──
@@ -249,12 +249,64 @@ async function assistPromemoria(frase) {
     return { html: `<p>${msg}</p>`, keep: true };
   }
 
+  return assistCreaPromemoria(destinatario, testo, q.quando);
+}
+
+async function assistCreaPromemoria(destinatario, testo, quando) {
+  const me = TCAuth.getNickname();
   testo = testo.charAt(0).toUpperCase() + testo.slice(1);
   const ref = assistRiferimento(testo);
-  await Messages.send([destinatario], testo, ref, q.quando.toISOString());
+  await Messages.send([destinatario], testo, ref, quando.toISOString());
   const perChi = destinatario === me ? 'Ti ricorderò' : `Lo ricorderò a <strong>${escapeHtml(destinatario)}</strong>`;
-  return { html: `<p>${perChi} <strong>${escapeHtml(assistQuandoLabel(q.quando))}</strong>:</p>
+  return { html: `<p>${perChi} <strong>${escapeHtml(assistQuandoLabel(quando))}</strong>:</p>
     <div class="assist-card"><span>${escapeHtml(testo)}</span>${ref ? MsgRef.chip(ref) : ''}</div>` };
+}
+
+// ─────────────────────────────────────────────
+// HAIKU (sistema misto)
+// Solo le frasi che le regole qui sopra non capiscono vanno alla funzione assistente:
+// Claude Haiku traduce la frase in una richiesta strutturata, eseguita qui sui dati
+// già caricati (a Claude non arrivano ordini né clienti). Il costo finisce in Costi.
+// ─────────────────────────────────────────────
+
+async function assistChiediAI(domanda) {
+  const d = new Date();
+  const adesso = `${d.toLocaleDateString('it-IT', { weekday: 'long' })} ${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`;
+  const utenti = await assistUsers();
+  const { data, error } = await supabaseClient.functions.invoke('assistente', { body: { domanda, adesso, utenti } });
+  if (error || !data?.success) {
+    let msg = data?.error;
+    try { msg = msg || (await error?.context?.json?.())?.error; } catch {}
+    throw new Error(msg || 'Assistente non disponibile in questo momento');
+  }
+  return assistEseguiAI(data.dati || {});
+}
+
+async function assistEseguiAI(r) {
+  const oggiIso = assistOggiIso();
+  if (r.tipo === 'elenco_promemoria') return assistElencoPromemoria();
+
+  if (r.tipo === 'promemoria') {
+    const p = r.promemoria || {};
+    const testo = String(p.testo || '').trim();
+    if (!testo) return { html: `<p>Di cosa ti devo ricordare?</p>`, keep: true };
+    const m = String(p.quando || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+    if (!m) return { html: '<p>Quando te lo devo ricordare? Ad esempio: <em>domani alle 10</em>.</p>', keep: true };
+    const quando = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+    if (quando <= new Date()) return { html: "<p>Quell'orario è già passato: dimmi un giorno o un'ora più avanti.</p>", keep: true };
+    const utenti = await assistUsers();
+    const dest = utenti.find(u => assistNorm(u) === assistNorm(p.destinatario)) || TCAuth.getNickname();
+    return assistCreaPromemoria(dest, testo, quando);
+  }
+
+  if (r.tipo === 'ordini') {
+    const o = r.ordini || {};
+    const tokens = assistTokens(assistNorm(o.cerca || ''));
+    const op = { conta: 'conta', elenco: 'elenco', piu_vecchio: 'vecchio', piu_recente: 'recente', apri: 'apri' }[o.operazione] || 'elenco';
+    return assistRispostaOrdini(tokens, op, assistGruppoDa(o.stato, o.scadenza_entro, oggiIso, tokens.length > 0), oggiIso);
+  }
+
+  return { html: `<p>${escapeHtml(r.risposta || 'Per ora so creare promemoria e rispondere sugli ordini.')}</p>` };
 }
 
 // Se il promemoria nomina un ordine o un cliente con un solo risultato, lo si allega
@@ -336,6 +388,28 @@ function assistGruppo(n, oggiIso) {
   return { label: 'da evadere', lista: daEvadere(), riepilogo: true };
 }
 
+// Gruppo dalla richiesta di Haiku (stato e scadenza già decisi)
+function assistGruppoDa(stato, entro, oggiIso, conNome) {
+  const daEvadere = () => TCFactory.getOrdersToDeliver();
+  const scad = (o) => TCFactory.getEffectiveDeadline(o)?.date || '';
+  const fmt = (iso) => new Date(iso + 'T12:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'long' });
+  switch (stato) {
+    case 'in_lavorazione': return { label: 'in lavorazione', lista: TCFactory.getActiveOrders(), esplicito: true };
+    case 'pronti':         return { label: 'pronti da evadere', lista: TCFactory.getEvasioneOrders(), esplicito: true };
+    case 'in_ritardo':     return { label: 'in ritardo', lista: daEvadere().filter(o => scad(o) && scad(o) < oggiIso), perScadenza: true, esplicito: true };
+    case 'in_scadenza': {
+      const fino = /^\d{4}-\d{2}-\d{2}$/.test(entro || '') ? entro : (() => { const d = new Date(); d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10); })();
+      return { label: fino === oggiIso ? 'in scadenza oggi' : `in scadenza entro il ${fmt(fino)}`,
+        lista: daEvadere().filter(o => scad(o) && scad(o) >= oggiIso && scad(o) <= fino), perScadenza: true, esplicito: true };
+    }
+    case 'da_riscuotere':  return { label: 'da riscuotere', lista: TCFactory.getDaRiscuotereOrders(), esplicito: true };
+    case 'evasi':          return { label: 'evasi', lista: TCFactory.getOrders().filter(o => !o.deletedAt && Pulsanti.isEvaso(o)), esplicito: true };
+    case 'archiviati':     return { label: 'archiviati', lista: TCFactory.getArchivedOrders(), esplicito: true };
+    case 'tutti':          return { label: '', lista: TCFactory.getOrders().filter(o => !o.deletedAt), esplicito: true };
+    default:               return { label: 'da evadere', lista: daEvadere(), riepilogo: true, esplicito: !conNome };
+  }
+}
+
 // Cosa si vuole sapere
 function assistOperazione(n) {
   if (/\b(quant[ie]|quanto|numero|totale)\b/.test(n)) return 'conta';
@@ -390,16 +464,20 @@ const assistCiSono = (k) => k === 1 ? "C'è un ordine" : `Ci sono ${k} ordini`;
 const assistLbl = (label, k) => !label ? '' : ' ' + (k !== 1 ? label
   : label.replace(/\bpronti\b/, 'pronto').replace(/\barchiviati\b/, 'archiviato').replace(/\bevasi\b/, 'evaso'));
 
-function assistOrdini(n) {
-  const oggiIso = TCFactory.getDefaultDate ? TCFactory.getDefaultDate() : new Date().toISOString().slice(0, 10);
-  const tokens = assistTokens(n);
-  const op = assistOperazione(n);
-  const gruppo = assistGruppo(n, oggiIso);
+const assistOggiIso = () => TCFactory.getDefaultDate ? TCFactory.getDefaultDate() : new Date().toISOString().slice(0, 10);
 
+function assistOrdini(n) {
+  const oggiIso = assistOggiIso();
+  return assistRispostaOrdini(assistTokens(n), assistOperazione(n), assistGruppo(n, oggiIso), oggiIso);
+}
+
+// tokens: parole del nome cercato · op: conta | elenco | vecchio | recente | apri | null · gruppo: da assistGruppo
+function assistRispostaOrdini(tokens, op, gruppo, oggiIso) {
   // Ricerca per nome: "dammi l'ordine di Crossfit Grosseto", "l'ultimo ordine di …"
-  if (tokens.length && !gruppo.esplicito && (op === null || op === 'recente' || op === 'elenco')) {
-    const trovati = assistCercaOrdini(n);
-    if (!trovati.length) return { html: `<p>Non trovo ordini per “${escapeHtml(tokens.join(' '))}”.</p>`, keep: true };
+  if (tokens.length && (op === 'apri' || (!gruppo.esplicito && (op === null || op === 'recente' || op === 'elenco')))) {
+    const trovati = TCFactory.getOrders().filter(o => !o.deletedAt && assistCorrisponde(o, tokens))
+      .sort((a, b) => (a.archived - b.archived) || String(b.dataOrdine || '').localeCompare(String(a.dataOrdine || '')));
+    if (!trovati.length) return { html: `<p>Non trovo ordini per “${escapeHtml(tokens.join(' '))}”.</p>`, keep: true, capito: false };
     if (trovati.length === 1 || op === 'recente') {
       const o = op === 'recente' ? [...trovati].sort(assistPerData).pop() : trovati[0];
       closeModal('assist-modal');
@@ -421,7 +499,7 @@ function assistOrdini(n) {
     di = ` per “${escapeHtml(tokens.join(' '))}”`;
   }
 
-  if (!lista.length) return { html: `<p>Non ci sono ordini${assistLbl(label, 2)}${di}.</p>` };
+  if (!lista.length) return { html: `<p>Non ci sono ordini${assistLbl(label, 2)}${di}.</p>`, capito: !tokens.length };
   const lbl = assistLbl(label, lista.length);
 
   if (op === 'vecchio' || op === 'recente') {
@@ -502,11 +580,12 @@ function renderAssistant(valore = '') {
           ${AssistState.log.length ? AssistState.log.map(r => `
             <div class="assist-q">${escapeHtml(r.q)}</div>
             <div class="assist-a">${r.a}</div>`).join('')
-          : `<p class="assist-muted">Chiedi qualcosa, ad esempio:</p>${assistEsempiHtml()}`}
+          : AssistState.attesa ? '' : `<p class="assist-muted">Chiedi qualcosa, ad esempio:</p>${assistEsempiHtml()}`}
+          ${AssistState.attesa ? `<div class="assist-q">${escapeHtml(AssistState.attesa)}</div><div class="assist-a assist-muted">Ci penso…</div>` : ''}
         </div>
         <form class="assist-form" onsubmit="event.preventDefault();assistInvia()">
           <input id="assist-input" class="form-input" autocomplete="off" maxlength="300" placeholder="Ricordami… · Dammi l'ordine di…"
-            value="${escapeHtml(valore)}" aria-label="Richiesta">
+            value="${escapeHtml(valore)}" aria-label="Richiesta" ${AssistState.attesa ? 'disabled' : ''}>
           ${ASSIST_SR ? `<button type="button" class="btn btn-secondary assist-mic ${AssistState.ascolto ? 'ascolto' : ''}" onclick="assistMic()"
             aria-pressed="${!!AssistState.ascolto}" aria-label="${AssistState.ascolto ? 'Smetti di ascoltare' : 'Parla'}" title="Parla">${ASSIST_ICONA_MIC}</button>` : ''}
           <button type="submit" class="btn btn-primary">Invia</button>
@@ -529,8 +608,17 @@ async function assistInvia(aVoce = false) {
   if (!q) return;
   input.disabled = true;
   let r;
-  try { r = await assistRispondi(q); }
+  try {
+    r = await assistRispondi(q);
+    if (r?.capito === false) {
+      AssistState.attesa = q;
+      renderAssistant(q);
+      try { r = await assistChiediAI(q); }
+      catch (e) { r = { ...r, html: r.html + `<p class="assist-muted">${escapeHtml(e.message)}</p>` }; }
+    }
+  }
   catch (e) { r = { html: `<p>${escapeHtml(e.message || 'Qualcosa è andato storto')}</p>`, keep: true }; }
+  finally { AssistState.attesa = null; }
   if (!r) { input.disabled = false; return; }
   if (aVoce) assistParla(r.html);
   AssistState.log.push({ q, a: r.html });

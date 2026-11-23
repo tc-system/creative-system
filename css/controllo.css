@@ -1229,3 +1229,9 @@ html .ctrl-btn.task-open:hover:not(:disabled) { background: linear-gradient(180d
 .dtf-nome-da { text-decoration: line-through; opacity: .7; }
 .dtf-nome em { font-style: normal; opacity: .65; font-size: .92em; }
 .dtf-nas { flex-basis: 100%; margin-top: 4px; color: var(--text-secondary); overflow-wrap: anywhere; }
+
+/* Costi → Assistente: tre totali in riga */
+.costi-assist-tot { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+.costi-assist-tot > div { flex: 1 1 140px; display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; border-radius: 16px; background: var(--bg-secondary); }
+.costi-assist-tot span { font-size: 0.78rem; color: var(--text-secondary); }
+.costi-assist-tot strong { font-size: 1.15rem; }
