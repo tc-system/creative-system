@@ -126,27 +126,22 @@ const SchedaOrdine = {
     el.querySelector('.so-corpo').scrollTop = scroll;
   },
 
+  // Tutte le fasi (di tutti i gruppi) in un'unica riga: il motivo del blocco esce come avviso al tocco
   _fasi(o) {
-    const gruppi = Pulsanti.gruppi().filter(g => Pulsanti.visibili(o, g.id).length);
-    if (!gruppi.length) return '<p class="so-vuoto">Nessuna fase per questo ordine.</p>';
-    return gruppi.map(g => `
-      <div class="so-gruppo">
-        ${gruppi.length > 1 ? `<div class="so-gruppo-nome">${escapeHtml(g.nome)}</div>` : ''}
-        <div class="so-fasi">
-          ${Pulsanti.visibili(o, g.id).map(p => {
-            const st = Pulsanti.stato(o, p);
-            const bloccato = !st.done && !Pulsanti.cliccabile(o, p);
-            const data = st.done ? st.date : st.mezzo ? st.mezzoDate : null;
-            return `<button type="button" class="so-fase ${st.done ? 'is-fatto' : st.mezzo ? 'is-mezzo' : ''}" ${bloccato ? `disabled title="${escapeHtml(Pulsanti.motivo(p))}"` : ''}
-                onclick="SchedaOrdine.fase('${escapeHtml(p.id)}')">
-                <span class="so-fase-segno">${st.done ? '✓' : st.mezzo ? '◐' : ''}</span>
-                <span class="so-fase-nome">${escapeHtml(Pulsanti.etichetta(o, p))}</span>
-                ${data ? `<span class="so-fase-data">${TCFactory.formatDate(data)}</span>` : ''}
-                ${bloccato ? `<span class="so-fase-data">${escapeHtml(Pulsanti.motivo(p))}</span>` : ''}
-              </button>`;
-          }).join('')}
-        </div>
-      </div>`).join('');
+    const fasi = Pulsanti.gruppi().flatMap(g => Pulsanti.visibili(o, g.id));
+    if (!fasi.length) return '<p class="so-vuoto">Nessuna fase per questo ordine.</p>';
+    return `<div class="so-fasi">${fasi.map(p => {
+      const st = Pulsanti.stato(o, p);
+      const bloccato = !st.done && !Pulsanti.cliccabile(o, p);
+      const data = st.done ? st.date : st.mezzo ? st.mezzoDate : null;
+      return `<button type="button" class="so-fase ${st.done ? 'is-fatto' : st.mezzo ? 'is-mezzo' : ''} ${bloccato ? 'is-bloccato' : ''}"
+          ${bloccato ? `aria-disabled="true" title="${escapeHtml(Pulsanti.motivo(p))}"` : ''}
+          onclick="SchedaOrdine.fase('${escapeHtml(p.id)}')">
+          <span class="so-fase-segno">${st.done ? '✓' : st.mezzo ? '◐' : ''}</span>
+          <span class="so-fase-nome">${escapeHtml(Pulsanti.etichetta(o, p))}</span>
+          <span class="so-fase-data">${data ? TCFactory.formatDate(data, { day: '2-digit', month: '2-digit' }) : ''}</span>
+        </button>`;
+    }).join('')}</div>`;
   },
 
   // Come il gestionale: clic = avanti (con passaggio intermedio giallo dove c'è); togliere una fase fatta chiede conferma
@@ -155,6 +150,7 @@ const SchedaOrdine = {
     const p = Pulsanti.get(pid);
     if (!o || !p) return;
     const st = Pulsanti.stato(o, p);
+    if (!st.done && !Pulsanti.cliccabile(o, p)) { showToast(Pulsanti.motivo(p), 'error'); return; }
     if (st.done && !(await uiConfirm(`Togliere "${Pulsanti.etichetta(o, p)}" da questo ordine?`, { ok: 'Togli' }))) return;
     await pulsanteToggle(o.id, pid, !st.done);
     this.render();
