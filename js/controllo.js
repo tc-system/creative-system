@@ -1626,7 +1626,7 @@ function renderBozzaTaskRiga(t) {
       <div class="task-actions">
         ${percorso ? `<button type="button" class="ctrl-btn" onclick="dtfNasCopia(${escapeHtml(JSON.stringify(percorso))})" title="Copia il percorso della cartella sul NAS">Copia percorso</button>` : ''}
         <button type="button" class="ctrl-btn" onclick="ctrlCopia(${escapeHtml(JSON.stringify(nome))}, 'Nome copiato: usalo per salvare il PDF')" title="Copia il nome del file">Copia nome</button>
-        <button type="button" class="ctrl-btn" onclick="SchedaOrdine.apri('${escapeHtml(id)}')">Apri ordine</button>
+        <button type="button" class="ctrl-btn" onclick="SchedaOrdine.apri('${escapeHtml(id)}')">Apri ordine</button>${taskXBtn(t)}
       </div>
     </article>`;
 }
@@ -1681,7 +1681,7 @@ function renderDtfTaskRiga(t) {
       </button>
       <div class="task-badges">${t.priorita === 'urgente' ? `<span class="td-tag" style="--c:${pr.color};">Urgente</span>` : ''}</div>
       <span class="task-time"></span>
-      <div class="task-actions">${azioni}</div>
+      <div class="task-actions">${azioni}${taskXBtn(t)}</div>
     </article>`;
 }
 
