@@ -7,7 +7,7 @@
 -- Il Mac mini (automazioni/dtf-cartella/bozze_nas.py) lo trova, lo carica con le anteprime delle pagine
 -- (JPG, per vederle subito sull'iPad) e indica dove andrebbe salvato se manca (percorso suggerito).
 -- Task: ordine aperto, non neutro, lavorazione non ancora Pronto e nessuna bozza → "Fare la bozza: <ordine>"
--- (Lavorazione grafica, designato riccardo, scadenza = scadenza dell'ordine). Si chiude da solo quando la bozza
+-- (Lavorazione grafica, assegnati a riccardo: il piano riscrive il designato, scadenza = scadenza dell'ordine). Si chiude da solo quando la bozza
 -- c'è o l'ordine non ne ha più bisogno (Pronto, neutro, evaso, eliminato).
 -- Richiede sql/bozze-ordini.sql. Si può rieseguire.
 -- ════════════════════════════════════════════════════════
@@ -46,7 +46,7 @@ create or replace function tc_bozze_task(p_chiave text)
 returns jsonb security definer set search_path = public language plpgsql as $$
 declare
   v_tipo uuid := (select id from task_tipi where nome = 'Lavorazione grafica' limit 1);
-  o record; n_aperti int := 0; n_chiusi int := 0;
+  r record; n_aperti int := 0; n_chiusi int := 0;
 begin
   if not _tc_chiave_automazione_ok(p_chiave) then return jsonb_build_object('success', false, 'error', 'Chiave non valida'); end if;
   create temp table if not exists _bozze_servono (id text primary key) on commit drop;
@@ -59,23 +59,23 @@ begin
      and not coalesce((o.order_module->>'neutro')::boolean, false)
      and not exists (select 1 from ordini_bozze b where b.order_id = o.id);
 
-  for o in select x.id, x.nome, x.deadline, s.suggerito from _bozze_servono z join orders x on x.id = z.id
+  for r in select x.id, x.nome, x.deadline, s.suggerito from _bozze_servono z join orders x on x.id = z.id
              join ordini_bozze_stato s on s.order_id = x.id loop
-    if not exists (select 1 from tasks where fonte = 'automazione' and fonte_rif->>'bozze' = o.id
+    if not exists (select 1 from tasks where fonte = 'automazione' and fonte_rif->>'bozze' = r.id
                     and stato not in ('completato', 'non_completato')) then
-      insert into tasks (tipo_id, titolo, descrizione, priorita, fonte, fonte_rif, riferimento, scadenza, minuti_stimati, creato_da, designato)
-      values (v_tipo, left('Fare la bozza: ' || coalesce(o.nome, o.id), 200),
+      insert into tasks (tipo_id, titolo, descrizione, priorita, fonte, fonte_rif, riferimento, scadenza, minuti_stimati, creato_da, designato, assegnato_a)
+      values (v_tipo, left('Fare la bozza: ' || coalesce(r.nome, r.id), 200),
         'Prepara un PDF con le bozze e salvalo sul NAS'
-          || coalesce(' in ' || o.suggerito, ' nella cartella del cliente, anno corrente,')
-          || ' col nome «' || o.id || ' bozza.pdf». Il task si chiude da solo quando il Mac mini lo trova (entro 5 minuti).',
-        'normale', 'automazione', jsonb_build_object('bozze', o.id, 'ordine', o.id, 'percorso', o.suggerito),
-        jsonb_build_object('tipo', 'ordine', 'id', o.id, 'label', coalesce(o.nome, o.id)), o.deadline, 20, 'automazione', 'riccardo');
+          || coalesce(' in ' || r.suggerito, ' nella cartella del cliente, anno corrente,')
+          || ' col nome «' || r.id || ' bozza.pdf». Il task si chiude da solo quando il Mac mini lo trova (entro 5 minuti).',
+        'normale', 'automazione', jsonb_build_object('bozze', r.id, 'ordine', r.id, 'percorso', r.suggerito),
+        jsonb_build_object('tipo', 'ordine', 'id', r.id, 'label', coalesce(r.nome, r.id)), r.deadline, 20, 'automazione', 'riccardo', 'riccardo');
       n_aperti := n_aperti + 1;
     else
       -- percorso suggerito aggiornato (es. cartella del cliente creata nel frattempo)
-      update tasks set fonte_rif = fonte_rif || jsonb_build_object('percorso', o.suggerito)
-       where fonte = 'automazione' and fonte_rif->>'bozze' = o.id and stato not in ('completato', 'non_completato')
-         and fonte_rif->>'percorso' is distinct from o.suggerito;
+      update tasks set fonte_rif = fonte_rif || jsonb_build_object('percorso', r.suggerito)
+       where fonte = 'automazione' and fonte_rif->>'bozze' = r.id and stato not in ('completato', 'non_completato')
+         and fonte_rif->>'percorso' is distinct from r.suggerito;
     end if;
   end loop;
 
@@ -118,3 +118,7 @@ begin
                group by b.order_id) x), '[]'::jsonb));
 end;
 $$;
+
+-- Task già aperti prima della correzione: assegnati a riccardo
+update tasks set assegnato_a = 'riccardo', designato = 'riccardo'
+ where fonte = 'automazione' and fonte_rif ? 'bozze' and stato not in ('completato', 'non_completato') and assegnato_a is null;
