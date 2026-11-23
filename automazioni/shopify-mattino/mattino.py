@@ -457,7 +457,19 @@ def disegna_ddt(c, o, shop, richieste, cache, non_pagato=False):
         c.setFont('Noto', CORPO)
         for i, r in enumerate(testi):
             c.drawString(139, y - 11 - i * 14, r)
-        c.drawRightString(513, y - alto / 2 - 3, f"{l['unfulfilledQuantity']} di {l['quantity']}")
+        da_fare, totale = l['unfulfilledQuantity'], l['quantity']
+        if da_fare > 1:
+            # Più pezzi dello stesso articolo: quantità in evidenza perché non sfugga in produzione
+            testo_q = f"{da_fare} copie" if da_fare == totale else f"{da_fare} di {totale} copie"
+            c.setFont('NotoB', 10)
+            largo = c.stringWidth(testo_q, 'NotoB', 10) + 12
+            c.setFillColorRGB(0.8, 0.1, 0.1)
+            c.roundRect(513 - largo, y - alto / 2 - 9, largo, 17, 3, stroke=0, fill=1)
+            c.setFillColorRGB(1, 1, 1)
+            c.drawRightString(507, y - alto / 2 - 4, testo_q)
+            c.setFillColorRGB(0, 0, 0)
+        else:
+            c.drawRightString(513, y - alto / 2 - 3, f"{da_fare} di {totale}")
         c.setFont('Noto', 7.5)
         for i, (nome, logo) in enumerate(loghi):
             x = 340 + i * 62
