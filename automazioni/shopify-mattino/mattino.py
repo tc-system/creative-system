@@ -409,7 +409,7 @@ def semplice(testo):
 
 
 def righe_articolo(l):
-    """Bienjugado. Riga 1: modello e UOMO/DONNA in celeste o rosa. Riga 2: tessuto, colore in grassetto, taglia.
+    """Bienjugado. Riga 1: modello, tessuto e UOMO/DONNA in celeste o rosa. Riga 2: colore in grassetto, taglia.
     Riga 3: grafica. Riga 4: nome da stampare e dove, tutta evidenziata. Poi gli altri campi (es. bandiera).
     Ritorna le righe e i campi personalizzati già usati."""
     opz = {x['name'].strip().lower(): x['value'].strip() for x in ((l.get('variant') or {}).get('selectedOptions') or [])}
@@ -436,11 +436,13 @@ def righe_articolo(l):
 
     righe = []
     pezzi = [(modello, 'Noto', None)]
+    if tessuto:
+        pezzi.append((f" - {tessuto}", 'Noto', None))
     if genere:
         pezzi += [(' ', 'Noto', None), (genere, 'NotoB', CELESTE if genere == 'UOMO' else ROSA)]
     righe.append((pezzi, None))
     pezzi = []
-    for testo, font in ((opz.pop('stile', None), 'Noto'), (tessuto, 'Noto'), (colore, 'NotoB'), (taglia, 'Noto')):
+    for testo, font in ((opz.pop('stile', None), 'Noto'), (colore, 'NotoB'), (taglia, 'Noto')):
         if testo:
             pezzi += [(' - ', 'Noto', None)] * bool(pezzi) + [(testo, font, None)]
     for k, v in opz.items():   # opzioni mai viste: si scrivono lo stesso
