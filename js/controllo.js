@@ -1671,7 +1671,7 @@ function renderDtfTaskRiga(t) {
     senza: (fuori ? `<button type="button" class="ctrl-btn" onclick="dtfTaskRipristina('${fuori.o.id}', ${fuori.tolto})" title="Rimette ${escapeHtml(fuori.o.nome)} tra gli ordini da stampare: la cartella si riabbina">${CtrlIcons.check()} <span>Ripristina</span></button>` : '')
       + `<button type="button" class="ctrl-btn" onclick="Nav.go('dtf', 'interno')" title="Apri la coda DTF interno">${fuori ? '' : `${CtrlIcons.check()} `}<span>Apri DTF interno</span></button>`,
     mancante: `<button type="button" class="ctrl-btn" onclick="openOrderDetail('${escapeHtml(rif)}')">Apri ordine</button>
-      <button type="button" class="ctrl-btn" onclick="dtfMarkPrinted('${escapeHtml(rif)}')" title="Segna il DTF come stampato">${CtrlIcons.check()} <span>Stampato</span></button>`,
+      <button type="button" class="ctrl-btn" onclick="dtfTaskStampato('${t.id}', '${escapeHtml(rif)}')" title="Segna il DTF come stampato">${CtrlIcons.check()} <span>Stampato</span></button>`,
     nome: copia,
     tif: tif?.corso
       ? `<button type="button" class="ctrl-btn" disabled title="Il Mac mini sta creando i TIF">TIFF in preparazione…</button>`
@@ -1693,6 +1693,22 @@ function renderDtfTaskRiga(t) {
       <span class="task-time"></span>
       <div class="task-actions">${azioni}${taskXBtn(t)}</div>
     </article>`;
+}
+
+// "Controllare se stampato" → Stampato: la riga sparisce subito, poi ordine segnato e task chiuso
+async function dtfTaskStampato(taskId, ordineId) {
+  const t = Ctrl.get(taskId), prima = t && { ...t };
+  if (t) t.stato = 'completato';
+  refreshControlPage();
+  try {
+    if (!await dtfMarkPrinted(ordineId)) throw new Error('');
+    await Ctrl.setStato(taskId, 'completato');
+    Ctrl.loadBadge();
+  } catch (e) {
+    if (t) Object.assign(t, prima);
+    refreshControlPage();
+    if (e.message) showToast(e.message, 'error');
+  }
 }
 
 // Riga del conto terzi (cartella del cliente copiata da Google Drive) in cima alla coda DTF
