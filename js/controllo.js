@@ -73,7 +73,7 @@ const TASK_CODE_Q = [
   { id: 'stampa',    label: 'STAMPA',            color: '#16a34a', hint: 'DTF stampati e merce pronta: si applica' },
   { id: 'altre',     label: 'ALTRE LAVORAZIONI', color: '#334155', hint: 'Tutto il resto, tranne i negozi online' },
   { id: 'negozi',    label: 'NEGOZI',            color: '#ec4899', hint: 'Ordini, mail e spedizioni dei negozi online' },
-  { id: 'scorte',    label: 'SCORTE',            color: '#7c3aed', hint: 'Stampe pronte dei negozi: si scalano dagli ordini, alla soglia il file va in 1. Stampare' },
+  { id: 'scorte',    label: 'SCORTE',            color: '#7c3aed', hint: 'Stampe e articoli dei negozi: si scalano dagli ordini; alla soglia il file della stampa va in 1. Stampare' },
 ];
 const TASK_CODE_VECCHIE = { file: 'dtffile', dtf: 'dtfstampa', lavorazione: 'altre' };
 const codaAttiva = () => { const c = TASK_CODE_VECCHIE[Ctrl.coda] || Ctrl.coda; return TASK_CODE_Q.some(x => x.id === c) ? c : TASK_CODE_Q[0].id; };
@@ -1438,7 +1438,7 @@ function renderTaskQueue(coda, emptyText = '') {
     const neg = SCORTE_NEGOZI.find(x => x.id === Ctrl.codaScorte) || SCORTE_NEGOZI[0];
     n = scorteSottoSoglia();
     corpo = `<div class="ctrl-macro-bar" role="group" aria-label="Negozio">
-        ${SCORTE_NEGOZI.map(x => ctrlFilter(x.id === neg.id, taskMacro(x.id)?.label || x.id, null, taskMacro(x.id)?.color, `setCodaScorte('${x.id}')`)).join('')}
+        ${SCORTE_NEGOZI.map(x => ctrlFilter(x.id === neg.id, taskMacro(x.id)?.label || x.id, scorteSottoSoglia(x.id) || null, taskMacro(x.id)?.color, `setCodaScorte('${x.id}')`)).join('')}
       </div>${renderScorteStampe(neg.id)}`;
   } else if (cat === 'bozze') {
     n = list.length;

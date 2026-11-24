@@ -17,17 +17,19 @@ const ScorteStampe = {
   errore: null,
   caricatoAt: 0,
   inCarico: false,
+  contate: null,    // { store_id, quantita, soglia } di tutte le scorte contate con la soglia (numero della coda)
 };
 
 // Negozi con le scorte delle stampe (le chip della coda SCORTE)
-const SCORTE_NEGOZI = [{ id: 'bienjugado' }];
+// Ciucciami: articoli (calzini per taglia, polsini) scalati da tutti i siti e dagli ordini del gestionale/Kamon
+const SCORTE_NEGOZI = [{ id: 'bienjugado' }, { id: 'ciucciamilcalzino' }];
 
 const SCORTE_FILTRI = { tutte: 'Tutte', contate: 'Da contare', nuove: 'Nuove' };
 
 async function scorteCarica(negozio) {
   ScorteStampe.negozio = negozio;
   ScorteStampe.inCarico = true;
-  const { data, error } = await supabaseClient.rpc('tc_stampe_lista', { p_store: negozio });
+  const [{ data, error }] = await Promise.all([supabaseClient.rpc('tc_stampe_lista', { p_store: negozio }), scorteContaCarica()]);
   ScorteStampe.inCarico = false;
   ScorteStampe.caricatoAt = Date.now();
   if (ScorteStampe.negozio !== negozio) return;
@@ -43,13 +45,19 @@ async function scorteCarica(negozio) {
   if (typeof ctrlAperto === 'function' && ctrlAperto()) refreshControlPage(); else scorteRender();
 }
 
-// Stampe contate scese alla soglia (il numero sulla coda SCORTE); la prima volta carica l'elenco
-function scorteSottoSoglia() {
-  if (ScorteStampe.stampe === null) {
-    if (!ScorteStampe.inCarico && typeof supabaseClient !== 'undefined') scorteCarica(ScorteStampe.negozio || SCORTE_NEGOZI[0].id);
-    return 0;
-  }
-  return ScorteStampe.stampe.filter(scorteSotto).length;
+// Scorte contate con la soglia, di tutti i negozi (per i numeri della coda e dei negozi)
+async function scorteContaCarica() {
+  const { data } = await supabaseClient.from('stampe_scorte').select('id, store_id, quantita, soglia').eq('conteggia', true).not('soglia', 'is', null);
+  if (data) ScorteStampe.contate = data;
+}
+
+// Scorte contate scese alla soglia (il numero sulla coda SCORTE), di un negozio o di tutti; la prima volta carica l'elenco
+function scorteSottoSoglia(negozio = null) {
+  if (ScorteStampe.stampe === null && !ScorteStampe.inCarico && typeof supabaseClient !== 'undefined') scorteCarica(ScorteStampe.negozio || SCORTE_NEGOZI[0].id);
+  // Il negozio aperto conta dall'elenco (appena salvato), gli altri dall'ultimo conteggio
+  const aperto = ScorteStampe.stampe ? ScorteStampe.negozio : null;
+  return (ScorteStampe.contate || []).filter(r => r.store_id !== aperto && (!negozio || r.store_id === negozio) && r.quantita <= r.soglia).length
+    + (aperto && (!negozio || negozio === aperto) ? ScorteStampe.stampe.filter(scorteSotto).length : 0);
 }
 
 // Famiglie in ordine alfabetico, con i loro colori
@@ -63,6 +71,7 @@ function scorteFamiglie() {
     nome, righe,
     conteggia: righe.some(r => r.conteggia),
     nuovo: righe.some(r => r.nuovo),
+    articolo: righe.some(r => r.regola),
     venduti: righe.reduce((t, r) => t + (r.venduti || 0), 0),
     sotto: righe.filter(scorteSotto).length,
   }));
@@ -98,6 +107,7 @@ function scorteHtml() {
     && (ScorteStampe.filtro !== 'contate' || f.conteggia) && (ScorteStampe.filtro !== 'nuove' || f.nuovo));
   const contate = tutte.filter(f => f.conteggia).length;
   const sotto = tutte.reduce((t, f) => t + f.sotto, 0);
+  const articoli = tutte.some(f => f.articolo);
   const dal = ScorteStampe.dal ? new Date(ScorteStampe.dal).toLocaleDateString('it-IT', { day: 'numeric', month: 'short', year: 'numeric' }) : null;
   return `
     <div class="scorte-testa">
@@ -109,7 +119,8 @@ function scorteHtml() {
       </div>
     </div>
     <p class="scorte-info">${contate} su ${tutte.length} da contare${sotto ? ` · <b class="scorte-rosso">${sotto} sotto soglia</b>` : ''}${dal ? ` · venduti dal ${dal}` : ''}.
-      Spunta le stampe da contare: da quel momento ogni ordine pagato scala i pezzi.</p>
+      ${articoli ? 'Spunta gli articoli da contare: da quel momento li scalano gli ordini pagati di tutti i siti e gli ordini del gestionale (anche da Kamon).'
+                 : 'Spunta le stampe da contare: da quel momento ogni ordine pagato scala i pezzi.'}</p>
     <ul class="scorte-lista">
       ${fam.map(scorteFamigliaHtml).join('') || '<li class="empty-list">Nessuna stampa</li>'}
     </ul>`;
@@ -125,14 +136,14 @@ function scorteFamigliaHtml(f) {
         <label class="check-inline scorte-check"><input type="checkbox" id="${id}" ${f.conteggia ? 'checked' : ''}
           onchange="scorteConteggia(${escapeHtml(JSON.stringify(f.nome))}, this.checked)"><span class="scorte-nome">${escapeHtml(f.nome)}</span></label>
         ${f.nuovo ? '<span class="chip chip-muted">nuovo</span>' : ''}
-        <span class="scorte-meta">${colori ? `${colori} color${colori === 1 ? 'e' : 'i'} · ` : ''}${f.venduti} vendut${f.venduti === 1 ? 'o' : 'i'}</span>
+        <span class="scorte-meta">${colori ? `${colori} ${f.articolo ? (colori === 1 ? 'taglia' : 'taglie') : (colori === 1 ? 'colore' : 'colori')} · ` : ''}${f.venduti} vendut${f.venduti === 1 ? 'o' : 'i'}</span>
         ${f.sotto ? `<span class="scorte-rosso scorte-meta">${f.sotto} sotto soglia</span>` : ''}
         ${f.conteggia && f.righe.length > 1 ? `<button type="button" class="btn btn-secondary scorte-apri" aria-expanded="${aperta}"
           onclick="scorteApri(${escapeHtml(JSON.stringify(f.nome))})">${aperta ? 'Chiudi' : 'Pezzi'}</button>` : ''}
       </div>
       ${aperta ? `<div class="scorte-tabella" role="table" aria-label="Pezzi di ${escapeHtml(f.nome)}">
-        <div class="scorte-tr scorte-th" role="row"><span role="columnheader">Colore</span><span role="columnheader">Pezzi</span>
-          <span role="columnheader">Soglia</span><span role="columnheader">Pezzi per file</span><span role="columnheader">File sul NAS (dentro DATI)</span><span role="columnheader"></span></div>
+        <div class="scorte-tr scorte-th" role="row"><span role="columnheader">${f.articolo ? 'Taglia' : 'Colore'}</span><span role="columnheader">Pezzi</span>
+          <span role="columnheader">Soglia</span><span role="columnheader">${f.articolo ? 'Pezzi per arrivo' : 'Pezzi per file'}</span><span role="columnheader">${f.articolo ? '' : 'File sul NAS (dentro DATI)'}</span><span role="columnheader"></span></div>
         ${f.righe.map(scorteRigaHtml).join('')}
       </div>` : ''}
     </li>`;
@@ -143,17 +154,17 @@ function scorteRigaHtml(r) {
     value="${r[k] == null ? '' : escapeHtml(String(r[k]))}" aria-label="${k}" onchange="scorteSalva('${r.id}', '${k}', this.value)">`;
   let stato = '';
   if (r.ristampa_at) stato = `<span class="scorte-stato is-giallo" title="Caricato in 1. Stampare/01 - Ordini Siti">In Stampare dal ${new Date(r.ristampa_at).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</span>`;
-  else if (scorteSotto(r)) stato = `<span class="scorte-stato is-rosso">${r.file ? 'Sotto soglia' : 'Sotto soglia, manca il file'}</span>`;
+  else if (scorteSotto(r)) stato = `<span class="scorte-stato is-rosso">${r.file || r.regola ? 'Sotto soglia' : 'Sotto soglia, manca il file'}</span>`;
   if (r.file && r.file_ok === false) stato += `<span class="scorte-stato is-rosso">File non trovato sul NAS</span>`;
   return `
     <div class="scorte-tr" role="row">
       <span role="cell" class="scorte-colore">${escapeHtml(r.colore || '—')}</span>
       <span role="cell" data-label="Pezzi">${campo('quantita', 'number', 'inputmode="numeric" step="1"')}</span>
       <span role="cell" data-label="Soglia">${campo('soglia', 'number', 'inputmode="numeric" step="1" min="0" placeholder="—"')}</span>
-      <span role="cell" data-label="Pezzi per file">${campo('pezzi_file', 'number', 'inputmode="numeric" step="1" min="1" placeholder="—"')}</span>
-      <span role="cell" data-label="File sul NAS">${campo('file', 'text', 'placeholder="Percorso del file" spellcheck="false"')}</span>
+      <span role="cell" data-label="${r.regola ? 'Pezzi per arrivo' : 'Pezzi per file'}">${campo('pezzi_file', 'number', 'inputmode="numeric" step="1" min="1" placeholder="—"')}</span>
+      ${r.regola ? '<span role="cell"></span>' : `<span role="cell" data-label="File sul NAS">${campo('file', 'text', 'placeholder="Percorso del file" spellcheck="false"')}</span>`}
       <span role="cell" class="scorte-azioni">${r.pezzi_file ? `<button type="button" class="btn btn-secondary scorte-ristampa"
-        title="Ristampa arrivata: aggiunge ${r.pezzi_file} pezzi" onclick="scorteSalva('${r.id}', 'aggiungi', ${r.pezzi_file})">+${r.pezzi_file}</button>` : ''}${stato}</span>
+        title="${r.regola ? 'Merce arrivata' : 'Ristampa arrivata'}: aggiunge ${r.pezzi_file} pezzi" onclick="scorteSalva('${r.id}', 'aggiungi', ${r.pezzi_file})">+${r.pezzi_file}</button>` : ''}${stato}</span>
     </div>`;
 }
 
