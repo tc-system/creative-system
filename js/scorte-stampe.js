@@ -13,7 +13,6 @@ const ScorteStampe = {
   dal: null,        // primo ordine importato (per "venduti")
   cerca: '',
   filtro: 'tutte',  // tutte | contate | nuove
-  aperte: new Set(),
   errore: null,
   caricatoAt: 0,
   inCarico: false,
@@ -81,7 +80,7 @@ const scorteSotto = (r) => r.conteggia && r.soglia != null && r.quantita <= r.so
 
 function renderScorteStampe(negozio) {
   if (ScorteStampe.negozio !== negozio || ScorteStampe.stampe === null) {
-    if (ScorteStampe.negozio !== negozio) { ScorteStampe.stampe = null; ScorteStampe.aperte.clear(); }
+    if (ScorteStampe.negozio !== negozio) ScorteStampe.stampe = null;
     if (!ScorteStampe.inCarico || ScorteStampe.negozio !== negozio) scorteCarica(negozio);
     return `<div id="scorte-root"><div class="empty-list">Caricamento…</div></div>`;
   }
@@ -121,48 +120,50 @@ function scorteHtml() {
     <p class="scorte-info">${contate} su ${tutte.length} da contare${sotto ? ` · <b class="scorte-rosso">${sotto} sotto soglia</b>` : ''}${dal ? ` · venduti dal ${dal}` : ''}.
       ${articoli ? 'Spunta gli articoli da contare: da quel momento li scalano gli ordini pagati di tutti i siti e gli ordini del gestionale (anche da Kamon).'
                  : 'Spunta le stampe da contare: da quel momento ogni ordine pagato scala i pezzi.'}</p>
-    <ul class="scorte-lista">
-      ${fam.map(scorteFamigliaHtml).join('') || '<li class="empty-list">Nessuna stampa</li>'}
-    </ul>`;
+    <div class="scorte-tabella" role="table" aria-label="Scorte">
+      <div class="scorte-tr scorte-th" role="row"><span role="columnheader">${articoli ? 'Articolo' : 'Stampa'}</span><span role="columnheader">Pezzi</span>
+        <span role="columnheader">Soglia</span><span role="columnheader">${articoli ? 'Pezzi per arrivo' : 'Pezzi per file'}</span>
+        <span role="columnheader">${articoli ? '' : 'File sul NAS (dentro DATI)'}</span><span role="columnheader"></span></div>
+      ${fam.map(scorteFamigliaHtml).join('') || '<div class="empty-list">Nessuna stampa</div>'}
+    </div>`;
 }
 
+// Una famiglia: con un colore solo sta su una riga; con più colori/taglie, una riga per ciascuno sotto il nome
 function scorteFamigliaHtml(f) {
   const id = 'sf-' + scorteChiave(f.nome);
-  const aperta = f.conteggia && (ScorteStampe.aperte.has(f.nome) || f.righe.length === 1 || f.sotto);
   const colori = f.righe.filter(r => r.colore).length;
-  return `
-    <li class="scorte-fam ${f.conteggia ? 'is-on' : ''}">
-      <div class="scorte-fam-riga">
+  const singola = f.righe.length === 1 && !f.righe[0].colore;
+  const nome = `
+      <span role="cell" class="scorte-fam-nome">
         <label class="check-inline scorte-check"><input type="checkbox" id="${id}" ${f.conteggia ? 'checked' : ''}
           onchange="scorteConteggia(${escapeHtml(JSON.stringify(f.nome))}, this.checked)"><span class="scorte-nome">${escapeHtml(f.nome)}</span></label>
         ${f.nuovo ? '<span class="chip chip-muted">nuovo</span>' : ''}
         <span class="scorte-meta">${colori ? `${colori} ${f.articolo ? (colori === 1 ? 'taglia' : 'taglie') : (colori === 1 ? 'colore' : 'colori')} · ` : ''}${f.venduti} vendut${f.venduti === 1 ? 'o' : 'i'}</span>
-        ${f.sotto ? `<span class="scorte-rosso scorte-meta">${f.sotto} sotto soglia</span>` : ''}
-        ${f.conteggia && f.righe.length > 1 ? `<button type="button" class="btn btn-secondary scorte-apri" aria-expanded="${aperta}"
-          onclick="scorteApri(${escapeHtml(JSON.stringify(f.nome))})">${aperta ? 'Chiudi' : 'Pezzi'}</button>` : ''}
-      </div>
-      ${aperta ? `<div class="scorte-tabella" role="table" aria-label="Pezzi di ${escapeHtml(f.nome)}">
-        <div class="scorte-tr scorte-th" role="row"><span role="columnheader">${f.articolo ? 'Taglia' : 'Colore'}</span><span role="columnheader">Pezzi</span>
-          <span role="columnheader">Soglia</span><span role="columnheader">${f.articolo ? 'Pezzi per arrivo' : 'Pezzi per file'}</span><span role="columnheader">${f.articolo ? '' : 'File sul NAS (dentro DATI)'}</span><span role="columnheader"></span></div>
-        ${f.righe.map(scorteRigaHtml).join('')}
-      </div>` : ''}
-    </li>`;
+      </span>`;
+  if (singola) return `<div class="scorte-fam ${f.conteggia ? 'is-on' : ''}">${scorteRigaHtml(f.righe[0], nome, f.conteggia)}</div>`;
+  return `
+    <div class="scorte-fam ${f.conteggia ? 'is-on' : ''}">
+      <div class="scorte-tr" role="row">${nome}</div>
+      ${f.conteggia ? f.righe.map(r => scorteRigaHtml(r, `<span role="cell" class="scorte-colore">${escapeHtml(r.colore || '—')}</span>`, true)).join('') : ''}
+    </div>`;
 }
 
-function scorteRigaHtml(r) {
+// Riga dei pezzi; prima = la cella iniziale (nome della famiglia o colore). Senza spunta niente campi.
+function scorteRigaHtml(r, prima, campi) {
+  if (!campi) return `<div class="scorte-tr" role="row">${prima}</div>`;
   const campo = (k, tipo, extra = '') => `<input class="form-input scorte-in scorte-in-${k}" id="sr-${r.id}-${k}" type="${tipo}" ${extra}
     value="${r[k] == null ? '' : escapeHtml(String(r[k]))}" aria-label="${k}" onchange="scorteSalva('${r.id}', '${k}', this.value)">`;
   let stato = '';
   if (r.ristampa_at) stato = `<span class="scorte-stato is-giallo" title="Caricato in 1. Stampare/01 - Ordini Siti">In Stampare dal ${new Date(r.ristampa_at).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</span>`;
   else if (scorteSotto(r)) stato = `<span class="scorte-stato is-rosso">${r.file || r.regola ? 'Sotto soglia' : 'Sotto soglia, manca il file'}</span>`;
-  if (r.file && r.file_ok === false) stato += `<span class="scorte-stato is-rosso">File non trovato sul NAS</span>`;
+  if (r.file && r.file_ok === false) stato += `<span class="scorte-stato is-rosso">File non trovato</span>`;
   return `
-    <div class="scorte-tr" role="row">
-      <span role="cell" class="scorte-colore">${escapeHtml(r.colore || '—')}</span>
+    <div class="scorte-tr ${scorteSotto(r) ? 'is-sotto' : ''}" role="row">
+      ${prima}
       <span role="cell" data-label="Pezzi">${campo('quantita', 'number', 'inputmode="numeric" step="1"')}</span>
       <span role="cell" data-label="Soglia">${campo('soglia', 'number', 'inputmode="numeric" step="1" min="0" placeholder="—"')}</span>
       <span role="cell" data-label="${r.regola ? 'Pezzi per arrivo' : 'Pezzi per file'}">${campo('pezzi_file', 'number', 'inputmode="numeric" step="1" min="1" placeholder="—"')}</span>
-      ${r.regola ? '<span role="cell"></span>' : `<span role="cell" data-label="File sul NAS">${campo('file', 'text', 'placeholder="Percorso del file" spellcheck="false"')}</span>`}
+      ${r.regola ? '<span role="cell" class="scorte-vuota"></span>' : `<span role="cell" data-label="File sul NAS">${campo('file', 'text', 'placeholder="Percorso del file" spellcheck="false"')}</span>`}
       <span role="cell" class="scorte-azioni">${r.pezzi_file ? `<button type="button" class="btn btn-secondary scorte-ristampa"
         title="${r.regola ? 'Merce arrivata' : 'Ristampa arrivata'}: aggiunge ${r.pezzi_file} pezzi" onclick="scorteSalva('${r.id}', 'aggiungi', ${r.pezzi_file})">+${r.pezzi_file}</button>` : ''}${stato}</span>
     </div>`;
@@ -170,16 +171,10 @@ function scorteRigaHtml(r) {
 
 const scorteChiave = (s) => s.toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
-function scorteApri(nome) {
-  if (ScorteStampe.aperte.has(nome)) ScorteStampe.aperte.delete(nome); else ScorteStampe.aperte.add(nome);
-  scorteRender();
-}
-
 async function scorteConteggia(nome, on) {
   const { data, error } = await supabaseClient.rpc('tc_stampe_conteggia', { p_store: ScorteStampe.negozio, p_famiglia: nome, p_on: on });
   if (error || !data?.success) { showToast(`Non salvato: ${error?.message || data?.error}`, 'error'); return scorteRender(); }
   for (const r of ScorteStampe.stampe) if (r.famiglia === nome) { r.conteggia = on; r.nuovo = false; }
-  if (on) ScorteStampe.aperte.add(nome);
   scorteRender();
 }
 
