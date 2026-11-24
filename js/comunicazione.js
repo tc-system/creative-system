@@ -31,7 +31,6 @@ const COM_LOGHI = {
   facebook: () => `<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="#1877F2"/><path d="M13.3 21.9v-7.1h2.4l.4-2.8h-2.8v-1.8c0-.8.3-1.4 1.4-1.4h1.5V6.3c-.3 0-1.2-.1-2.2-.1-2.2 0-3.6 1.3-3.6 3.7V12H8v2.8h2.4v7.1" fill="#fff"/></svg>`,
   whatsapp: () => `<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2z" fill="#25D366"/><path d="M8.6 7.2c.2-.4.4-.4.7-.4h.5c.2 0 .4 0 .6.5l.8 1.9c.1.2.1.4 0 .6l-.4.6c-.1.2-.2.3 0 .6.5.8 1.1 1.5 1.9 2 .8.5 1.1.6 1.4.4l.7-.8c.2-.2.4-.2.6-.1l1.8.9c.3.1.4.2.4.4 0 .5-.2 1.2-.7 1.5-.5.4-1.5.7-2.9.2-1.6-.6-3.3-1.9-4.4-3.5-.9-1.3-1.2-2.4-.9-3.3.2-.7.6-1.2.8-1.5z" fill="#fff"/></svg>`,
   shopify: () => `<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M15.6 4.3 14.9 2.4c-.2-.4-.6-.5-.9-.4L12.6 2.5C12 1.6 11.2 1.2 10.4 1.3 8.5 1.4 7.4 3.8 7 5.3L4.6 6c-.6.2-.7.3-.7.9L2 20.6 15.9 23l5.9-1.3L19.3 5.6l-3.7-1.3z" fill="#95BF47"/><path d="M15.6 4.3 15.9 23l5.9-1.3L19.3 5.6c-.1-.6-.6-.7-1-.7l-2.7-.6z" fill="#5E8E3E"/><path d="M12.4 8.6 11.8 10.5s-.7-.4-1.5-.3c-1.2.1-1.2.8-1.2 1 .1 1 2.8 1.3 3 3.7.1 1.9-1 3.1-2.6 3.2-2 .1-3-1.1-3-1.1l.4-1.8s1.1.8 2 .8c.6 0 .8-.5.8-.8-.1-1.3-2.3-1.3-2.4-3.5-.1-1.8 1.1-3.7 3.7-3.8 1-.1 1.4.2 1.4.2z" fill="#fff"/></svg>`,
-  scorte: () => `<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="6" fill="#7C3AED"/><path d="M7 15.5h10M7 11.5h10M7 7.5h6" stroke="#fff" stroke-width="1.9" stroke-linecap="round"/><circle cx="16.5" cy="7.5" r="1.5" fill="#fff"/></svg>`,
   spedizioni: () => `<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><rect x="1" y="3" width="22" height="18" rx="5" fill="#F59E0B"/><path d="M5 8.5h8v7H5zM13 10.5h3l2.5 2.5v2.5H13z" fill="#fff"/><circle cx="8" cy="16.2" r="1.6" fill="#F59E0B" stroke="#fff" stroke-width="1.2"/><circle cx="16" cy="16.2" r="1.6" fill="#F59E0B" stroke="#fff" stroke-width="1.2"/></svg>`,
 };
 
@@ -42,8 +41,6 @@ const COM_CANALI = [
   { id: 'whatsapp',  label: 'WhatsApp' },
   { id: 'shopify',    label: 'Shopify',    admin: true },
   { id: 'spedizioni', label: 'Spedizioni', admin: true },
-  // Scorte delle stampe pronte (js/scorte-stampe.js): per ora solo Bienjugado
-  { id: 'scorte',     label: 'Scorte stampe', negozi: ['bienjugado'] },
 ];
 // Canali che vede chi è collegato (Shopify e Spedizioni solo gli admin, come prima nel Centro di controllo)
 const comCanali = (negozio = Comun.negozio) => COM_CANALI.filter(c => (!c.admin || TCAuth.isAdmin()) && (!c.negozi || c.negozi.includes(negozio)));
@@ -109,7 +106,6 @@ function comStato(negozio, canale) {
   if (canale.id === 'spedizioni' && negozio.esterne) return { testo: canale.label, attivo: true };
   if (comCanaleShop(canale.id)) return isNegozioShopify(negozio.id) ? { testo: canale.label, attivo: true } : { testo: 'Non è un negozio Shopify', attivo: false };
   if (canale.id === 'whatsapp') return { testo: 'Da configurare', attivo: false };
-  if (canale.id === 'scorte') return { testo: canale.label, attivo: true };
   if (canale.id === 'mail') {
     const cc = comCaselle(negozio);
     if (!cc.length) return { testo: Nav.isAllowed('comunicazione') ? 'Da configurare' : 'Serve l\'accesso alla Mail', attivo: false };
@@ -223,12 +219,6 @@ function renderComBody() {
     ShopLinks.negozio = negozio.id;
     ShopLinks.negozioGls = negozio.id;
     return metti(canale.id === 'shopify' ? renderControlOrders() : renderControlGls());
-  }
-
-  if (canale.id === 'scorte') {
-    // Ridisegnata dai giri della Mail: l'elenco resta quello già caricato (input e fuoco compresi)
-    if (body.querySelector('#scorte-root') && ScorteStampe.negozio === negozio.id && ScorteStampe.stampe) return;
-    return metti(renderScorteStampe(negozio.id));
   }
 
   if (canale.id === 'whatsapp') return metti(vuoto('WhatsApp da configurare', 'Il collegamento di WhatsApp non è ancora attivo.'));

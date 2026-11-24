@@ -1,5 +1,5 @@
-/* ── Brand → Scorte stampe ── */
-.scorte { padding: 20px 22px; }
+/* ── Task → coda SCORTE ── */
+.scorte { padding-top: 4px; }
 .scorte-testa { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .scorte-testa .search-box { flex: 1; min-width: 200px; }
 .scorte-filtri { display: inline-flex; gap: 6px; }
@@ -30,7 +30,6 @@
 html.dark .scorte-stato.is-giallo { color: #facc15; }
 
 @media (max-width: 760px) {
-  .scorte { padding: 16px; }
   .scorte-tabella { margin-left: 0; }
   .scorte-th { display: none; }
   .scorte-tr { grid-template-columns: 1fr 1fr 1fr; padding: 8px 0; border-top: 1px dashed var(--border); }

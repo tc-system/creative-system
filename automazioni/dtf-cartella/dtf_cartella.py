@@ -1206,7 +1206,7 @@ def cartella_ordini_siti(cartella, prova):
 
 
 def ristampa_stampe(cfg, cartella, prova, stato):
-    """Scorte delle stampe dei negozi (Brand → Scorte stampe, sql/stampe-scorte.sql): controlla che i file ci siano
+    """Scorte delle stampe dei negozi (Task → coda SCORTE, sql/stampe-scorte.sql): controlla che i file ci siano
     sul NAS (percorso dentro DATI) e copia in "01 - Ordini Siti" quelli scesi alla soglia, una volta sola
     (il gestionale segna ristampa_at e lo azzera quando i pezzi tornano sopra la soglia)."""
     d = rpc(cfg, 'tc_stampe_ristampa_dati', {'p_chiave': cfg['chiave']})

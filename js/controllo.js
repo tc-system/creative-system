@@ -65,6 +65,7 @@ const TASK_CODE = [
 //   STAMPA: DTF stampati e merce pronta, si applica
 //   ALTRE LAVORAZIONI: tutto il resto che non riguarda i negozi online
 //   NEGOZI: tutto quello dei negozi online (produzione Shopify, mail, indirizzi, giacenze), filtrabile per negozio
+//   SCORTE: le stampe pronte dei negozi (js/scorte-stampe.js), per negozio; il numero = stampe sotto soglia
 const TASK_CODE_Q = [
   { id: 'bozze',     label: 'BOZZE',             color: '#f59e0b', hint: 'Ordini in lavorazione senza la bozza in PDF sul NAS' },
   { id: 'dtffile',   label: 'DTF-FILE',          color: '#a855f7', hint: 'Ordini con DTF senza file nella cartella 1. Stampare, e proposte da approvare' },
@@ -72,6 +73,7 @@ const TASK_CODE_Q = [
   { id: 'stampa',    label: 'STAMPA',            color: '#16a34a', hint: 'DTF stampati e merce pronta: si applica' },
   { id: 'altre',     label: 'ALTRE LAVORAZIONI', color: '#334155', hint: 'Tutto il resto, tranne i negozi online' },
   { id: 'negozi',    label: 'NEGOZI',            color: '#ec4899', hint: 'Ordini, mail e spedizioni dei negozi online' },
+  { id: 'scorte',    label: 'SCORTE',            color: '#7c3aed', hint: 'Stampe pronte dei negozi: si scalano dagli ordini, alla soglia il file va in 1. Stampare' },
 ];
 const TASK_CODE_VECCHIE = { file: 'dtffile', dtf: 'dtfstampa', lavorazione: 'altre' };
 const codaAttiva = () => { const c = TASK_CODE_VECCHIE[Ctrl.coda] || Ctrl.coda; return TASK_CODE_Q.some(x => x.id === c) ? c : TASK_CODE_Q[0].id; };
@@ -544,6 +546,8 @@ function refreshControlPage() {
   if (!ctrlAperto()) return;
   // Un aggiornamento in tempo reale non deve cancellare le regole in modifica
   if (Ctrl.view === 'cervello' && CtrlBrain.sez === 'regole' && CtrlBrain.modificato) return;
+  // …né il numero che si sta scrivendo nelle scorte
+  if (document.activeElement?.closest?.('#scorte-root input[type="text"], #scorte-root input[type="number"]')) return;
   renderControlPage();
   renderHeader();
 }
@@ -1430,7 +1434,13 @@ function renderTaskQueue(coda, emptyText = '') {
   const ordinati = sortTasks;
   const sub = (titolo, html) => `<div class="ctrl-sub">${titolo}</div><div class="task-list task-stack">${html}</div>`;
   let corpo, n;
-  if (cat === 'bozze') {
+  if (cat === 'scorte') {
+    const neg = SCORTE_NEGOZI.find(x => x.id === Ctrl.codaScorte) || SCORTE_NEGOZI[0];
+    n = scorteSottoSoglia();
+    corpo = `<div class="ctrl-macro-bar" role="group" aria-label="Negozio">
+        ${SCORTE_NEGOZI.map(x => ctrlFilter(x.id === neg.id, taskMacro(x.id)?.label || x.id, null, taskMacro(x.id)?.color, `setCodaScorte('${x.id}')`)).join('')}
+      </div>${renderScorteStampe(neg.id)}`;
+  } else if (cat === 'bozze') {
     n = list.length;
     corpo = list.length ? `<div class="task-list task-stack">${ordinati(list).map(renderBozzaTaskRiga).join('')}</div>`
                         : '<div class="empty-list">Tutti gli ordini in lavorazione hanno la bozza.</div>';
@@ -1477,7 +1487,7 @@ function renderTaskQueue(coda, emptyText = '') {
       <div class="page-card-head"><h2>${escapeHtml(info.label)}</h2><span class="table-count">${n}</span>
         <span class="ctrl-group-hint">${escapeHtml(info.hint)}</span></div>
       ${taskCodaBar(coda, righe)}
-      ${list.length && !['bozze', 'dtffile', 'dtfstampa'].includes(cat) ? taskAutoNote(list) : ''}
+      ${list.length && !['bozze', 'dtffile', 'dtfstampa', 'scorte'].includes(cat) ? taskAutoNote(list) : ''}
       <div class="tk-split-list ${CtrlAnim.filtro ? 'ctrl-fade' : ''}">${corpo}</div>
     </section>`;
 }
@@ -1756,7 +1766,7 @@ async function codaDtfFatto(id) {
 
 // Filtro della coda comune: prima le code di produzione (sempre), poi i brand con almeno un task
 function taskCodaBar(list, righe) {
-  const conta = { dtffile: righe.file.length, dtfstampa: righe.stampa.length };
+  const conta = { dtffile: righe.file.length, dtfstampa: righe.stampa.length, scorte: scorteSottoSoglia() };
   list.forEach(t => { const c = taskCoda(t); if (c) conta[c] = (conta[c] || 0) + 1; });
   const att = codaAttiva();
   return `
@@ -1767,6 +1777,10 @@ function taskCodaBar(list, righe) {
 
 function setControlCoda(id) {
   Ctrl.coda = id;
+  refreshControlPage();
+}
+function setCodaScorte(id) {
+  Ctrl.codaScorte = id;
   refreshControlPage();
 }
 

@@ -1,5 +1,5 @@
 /**
- * T&C Factory — Scorte delle stampe dei negozi (Brand → Bienjugado → Scorte stampe)
+ * T&C Factory — Scorte delle stampe dei negozi (Task → coda SCORTE → Bienjugado)
  *
  *  Elenco delle stampe per famiglia di prodotti (es. "Short Uomo") con i colori della stampa.
  *  La spunta sulla famiglia dice di contarla: da lì ogni ordine pagato scala i pezzi da solo
@@ -15,13 +15,21 @@ const ScorteStampe = {
   filtro: 'tutte',  // tutte | contate | nuove
   aperte: new Set(),
   errore: null,
+  caricatoAt: 0,
+  inCarico: false,
 };
+
+// Negozi con le scorte delle stampe (le chip della coda SCORTE)
+const SCORTE_NEGOZI = [{ id: 'bienjugado' }];
 
 const SCORTE_FILTRI = { tutte: 'Tutte', contate: 'Da contare', nuove: 'Nuove' };
 
 async function scorteCarica(negozio) {
   ScorteStampe.negozio = negozio;
+  ScorteStampe.inCarico = true;
   const { data, error } = await supabaseClient.rpc('tc_stampe_lista', { p_store: negozio });
+  ScorteStampe.inCarico = false;
+  ScorteStampe.caricatoAt = Date.now();
   if (ScorteStampe.negozio !== negozio) return;
   if (error || !data?.success) {
     ScorteStampe.errore = error?.message || data?.error || 'Elenco non letto';
@@ -31,7 +39,17 @@ async function scorteCarica(negozio) {
     ScorteStampe.stampe = data.stampe;
     ScorteStampe.dal = data.dal;
   }
-  scorteRender();
+  // Nei task si ridisegna la pagina intera: cambia anche il numero della coda
+  if (typeof ctrlAperto === 'function' && ctrlAperto()) refreshControlPage(); else scorteRender();
+}
+
+// Stampe contate scese alla soglia (il numero sulla coda SCORTE); la prima volta carica l'elenco
+function scorteSottoSoglia() {
+  if (ScorteStampe.stampe === null) {
+    if (!ScorteStampe.inCarico && typeof supabaseClient !== 'undefined') scorteCarica(ScorteStampe.negozio || SCORTE_NEGOZI[0].id);
+    return 0;
+  }
+  return ScorteStampe.stampe.filter(scorteSotto).length;
 }
 
 // Famiglie in ordine alfabetico, con i loro colori
@@ -55,10 +73,12 @@ const scorteSotto = (r) => r.conteggia && r.soglia != null && r.quantita <= r.so
 function renderScorteStampe(negozio) {
   if (ScorteStampe.negozio !== negozio || ScorteStampe.stampe === null) {
     if (ScorteStampe.negozio !== negozio) { ScorteStampe.stampe = null; ScorteStampe.aperte.clear(); }
-    scorteCarica(negozio);
-    return `<div class="glass-card page-card" id="scorte-root"><div class="empty-list">Caricamento…</div></div>`;
+    if (!ScorteStampe.inCarico || ScorteStampe.negozio !== negozio) scorteCarica(negozio);
+    return `<div id="scorte-root"><div class="empty-list">Caricamento…</div></div>`;
   }
-  return `<div class="glass-card page-card scorte" id="scorte-root">${scorteHtml()}</div>`;
+  // Riaperta dopo un po': rilegge i pezzi scalati dagli ordini, intanto mostra quelli che ha
+  if (!ScorteStampe.inCarico && Date.now() - ScorteStampe.caricatoAt > 60000) scorteCarica(negozio);
+  return `<div class="scorte" id="scorte-root">${scorteHtml()}</div>`;
 }
 
 function scorteRender() {
