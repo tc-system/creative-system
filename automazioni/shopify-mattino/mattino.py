@@ -148,6 +148,28 @@ def carica_nel_gestionale(cartella, reg):
     return falliti
 
 
+ORDINI_SITI = 'Ordini Siti'
+
+
+def cartella_ordini_siti(reg):
+    """Cartellina dei fogli DTF in "1. Stampare" sul NAS (CS_CARTELLA_STAMPARE, solo sul Mac in sede).
+    Va bene anche col numero che le dà la coda DTF ("01 - Ordini Siti"); se manca si crea, già prima.
+    None se la variabile non c'è (server) o il NAS non è collegato."""
+    radice = os.environ.get('CS_CARTELLA_STAMPARE')
+    if not radice:
+        return None
+    radice = Path(radice).expanduser()
+    if not radice.is_dir():
+        reg.scrivi(f'ATTENZIONE: "{radice}" non raggiungibile')
+        return None
+    for p in radice.iterdir():
+        if p.is_dir() and re.sub(r'^\d{1,3}\s*-\s*', '', p.name).strip().lower() == ORDINI_SITI.lower():
+            return p
+    p = radice / f'01 - {ORDINI_SITI}'
+    p.mkdir()
+    return p
+
+
 def scarica_libreria(base, reg):
     """Server del mattino: copia la libreria DTF dal gestionale (bucket dtf-libreria) nella cartella locale,
     scaricando solo i file nuovi o cambiati e togliendo quelli spariti. Sul Mac in sede non serve."""
@@ -979,9 +1001,16 @@ def giro(args, applica, reg):
             voci = [v for v in voci if dtf.tipo_capo(v[1], v[2])]
             if not voci:
                 continue
-            sotto = cartella / f"{NEGOZI_DTF[n['id']]} - DTF"
-            sotto.mkdir(exist_ok=True)
-            creati, a_mano, falliti = dtf.crea_fogli(sotto, NEGOZI_DTF[n['id']], voci, dtf.Libreria(args.cartella / dtf.CARTELLA_LIBRERIA))
+            # Mac in sede: direttamente in "1. Stampare/01 - Ordini Siti" sul NAS, non nei file del mattino.
+            # Se il NAS non c'è restano nella cartella del giorno, con l'avviso nel riepilogo
+            sotto = cartella_ordini_siti(reg)
+            if sotto is None:
+                sotto = cartella / f"{NEGOZI_DTF[n['id']]} - DTF"
+                sotto.mkdir(exist_ok=True)
+                if os.environ.get('CS_CARTELLA_STAMPARE'):
+                    avvisi_stampa[n['id']].append(f'fogli DTF NON in "1. Stampare" (NAS non raggiungibile): sono nella cartella del giorno, "{sotto.name}"')
+            creati, a_mano, falliti = dtf.crea_fogli(sotto, NEGOZI_DTF[n['id']], voci, dtf.Libreria(args.cartella / dtf.CARTELLA_LIBRERIA),
+                                                     anteprime=sotto.is_relative_to(cartella))
             dtf_creati[n['id']] = creati
             dtf_a_mano[n['id']] = a_mano
             falliti_stampa |= {(n['id'], o) for o in falliti}
@@ -1011,7 +1040,8 @@ def giro(args, applica, reg):
         for o in non_pagati[i]:
             fare.append((f"Non spedire {o['name']} finché non è pagato ({stato_pagamento(o)}): DDT nel PDF, niente tag né file di stampa", True))
         for p, alto in dtf_creati.get(i, []):
-            fare.append((f'Stampare il foglio DTF "{p.name}" ({alto:g} cm)', False))
+            dove = '' if p.is_relative_to(cartella) else f' (in 1. Stampare/{p.parent.name})'
+            fare.append((f'Stampare il foglio DTF "{p.name}" ({alto:g} cm){dove}', False))
         if i in pdf_stampa:
             pdf, pag, copie = pdf_stampa[i]
             fare.append((f'Stampare il PDF dei file di stampa "{pdf.name}": {pag} pagine, {sum(copie)} stampe ({testo_copie(copie)})', False))

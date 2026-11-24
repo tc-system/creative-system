@@ -10,7 +10,7 @@ cp .env.example .env
 .venv/bin/python mattino.py --cartella "/Users/Shared/Creative System" --applica  # mette i tag
 ```
 
-Per Box Factory Lab crea anche la cartellina `Box Factory Lab - DTF`. Dentro ci sono i fogli TIF (CMYK + SPOT, al massimo 57x100 cm) con le grafiche delle t-shirt, i nomi e le bandiere, più un'anteprima JPG per ogni foglio. Le regole e la libreria sono descritte in `dtf.py` e in `../box-factory-dtf/README.md`.
+Per Box Factory Lab crea i fogli TIF (CMYK + SPOT, al massimo 57x100 cm) con le grafiche delle t-shirt, i nomi e le bandiere. Sul Mac in sede (dal 2026-11-24) vanno **direttamente sul NAS**, nella cartellina prioritaria `01 - Ordini Siti` di `DTF/1. Stampa/1. Stampare` (variabile `CS_CARTELLA_STAMPARE` nel `.env`; la cartella si crea se manca e va bene con qualsiasi numero davanti), senza anteprime JPG (lì conterebbero come file da stampare) e non nei file del mattino. La coda DTF la riconosce come lavorazione per i negozi: in cima, niente task. Se il NAS non risponde, o sul server (variabile assente), finiscono come prima nella cartellina `Box Factory Lab - DTF` del giorno con un'anteprima JPG per foglio, e il riepilogo lo segnala. Le regole e la libreria sono descritte in `dtf.py` e in `../box-factory-dtf/README.md`.
 
 Regole:
 - Entrano gli ordini non evasi, non annullati e senza i tag `stampato` e `auto-stampato`.
