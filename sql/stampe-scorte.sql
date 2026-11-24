@@ -8,7 +8,7 @@
 -- Quando i pezzi scendono alla soglia, il Mac mini (automazioni/dtf-cartella) copia il file
 -- della stampa dal NAS in "1. Stampare/01 - Ordini Siti" e segna ristampa_at; si azzera da
 -- solo quando i pezzi tornano sopra la soglia (correzione o ristampa arrivata).
--- Gestione: Brand → <negozio> → Scorte stampe (js/scorte-stampe.js).
+-- Gestione: Task → coda SCORTE → <negozio> (js/scorte-stampe.js).
 -- Si può rieseguire.
 -- ════════════════════════════════════════════════════════
 
@@ -49,10 +49,10 @@ create index if not exists stampe_movimenti_stampa_idx on stampe_movimenti (stam
 
 alter table stampe_scorte enable row level security;
 alter table stampe_movimenti enable row level security;
-drop policy if exists "Brand legge scorte" on stampe_scorte;
-create policy "Brand legge scorte" on stampe_scorte for select to authenticated using (app_vede_scheda('comunicazione'));
-drop policy if exists "Brand legge movimenti" on stampe_movimenti;
-create policy "Brand legge movimenti" on stampe_movimenti for select to authenticated using (app_vede_scheda('comunicazione'));
+drop policy if exists "Task legge scorte" on stampe_scorte;
+create policy "Task legge scorte" on stampe_scorte for select to authenticated using (app_vede_scheda('tasks'));
+drop policy if exists "Task legge movimenti" on stampe_movimenti;
+create policy "Task legge movimenti" on stampe_movimenti for select to authenticated using (app_vede_scheda('tasks'));
 revoke all on stampe_scorte, stampe_movimenti from anon, authenticated;
 grant select on stampe_scorte, stampe_movimenti to authenticated;
 
@@ -138,7 +138,7 @@ create trigger shopify_orders_stampe after insert or update of righe, stato_paga
 create or replace function tc_stampe_lista(p_store text) returns jsonb
 language plpgsql stable security definer set search_path = public as $$
 begin
-  if not app_vede_scheda('comunicazione') then return jsonb_build_object('success', false, 'error', 'Non autorizzato'); end if;
+  if not app_vede_scheda('tasks') then return jsonb_build_object('success', false, 'error', 'Non autorizzato'); end if;
   return jsonb_build_object('success', true,
     'dal', (select min(creato_at) from shopify_orders where store_id = p_store),
     'stampe', coalesce((
@@ -157,7 +157,7 @@ $$;
 create or replace function tc_stampe_conteggia(p_store text, p_famiglia text, p_on boolean) returns jsonb
 language plpgsql security definer set search_path = public as $$
 begin
-  if not app_vede_scheda('comunicazione') then return jsonb_build_object('success', false, 'error', 'Non autorizzato'); end if;
+  if not app_vede_scheda('tasks') then return jsonb_build_object('success', false, 'error', 'Non autorizzato'); end if;
   update stampe_scorte set conteggia = p_on, nuovo = false, aggiornato_da = app_nickname()
    where store_id = p_store and famiglia = p_famiglia;
   return jsonb_build_object('success', true);
@@ -170,7 +170,7 @@ create or replace function tc_stampe_salva(p_id uuid, p_campi jsonb) returns jso
 language plpgsql security definer set search_path = public as $$
 declare s stampe_scorte; v_q int; v_chi text := app_nickname();
 begin
-  if not app_vede_scheda('comunicazione') then return jsonb_build_object('success', false, 'error', 'Non autorizzato'); end if;
+  if not app_vede_scheda('tasks') then return jsonb_build_object('success', false, 'error', 'Non autorizzato'); end if;
   select * into s from stampe_scorte where id = p_id for update;
   if not found then return jsonb_build_object('success', false, 'error', 'Stampa non trovata'); end if;
   v_q := s.quantita;
