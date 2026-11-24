@@ -515,7 +515,8 @@ async function dtfMarkPrinted(id) {
     else await TCFactory.setStage(id, 'dtfPronti', true);
     showToast(`"${o?.nome}": DTF stampato ✓`);
     dtfAfterHistoryChange(); renderOrderList();
-  } catch { showToast('Impossibile segnare come stampato', 'error'); }
+    return true;
+  } catch { showToast('Impossibile segnare come stampato', 'error'); return false; }
 }
 
 async function dtfRestorePrinted(id) {
