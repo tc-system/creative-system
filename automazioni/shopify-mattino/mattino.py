@@ -79,6 +79,10 @@ ORDINE = '''query($id:ID!){order(id:$id){
   lineItems(first:100){nodes{title variantTitle quantity unfulfilledQuantity requiresShipping
     image{url(transform:{maxWidth:160})} customAttributes{key value}}}
 }}'''
+# Bienjugado: sul DDT le righe dell'articolo sono ricomposte (modello, uomo/donna, tessuto, colore, taglia, grafica, nome)
+# e servono le opzioni della variante e i tag del prodotto
+NEGOZI_DDT_ARTICOLI = {'bienjugado'}
+ORDINE_ARTICOLI = ORDINE.replace('customAttributes{key value}}}', 'customAttributes{key value} variant{selectedOptions{name value}} product{tags}}}')
 NEGOZIO = '{shop{name contactEmail primaryDomain{host} billingAddress{address1 address2 zip city provinceCode country countryCodeV2}} currentAppInstallation{accessScopes{handle}}}'
 AGGIUNGI_TAG = 'mutation($id:ID!,$tags:[String!]!){tagsAdd(id:$id,tags:$tags){userErrors{message}}}'
 
@@ -240,6 +244,7 @@ class Shopify:
             raise RuntimeError('token mancante')
         self.url = f"https://{negozio['dominio']}/admin/api/{API}/graphql.json"
         self.headers = {'Content-Type': 'application/json', 'X-Shopify-Access-Token': negozio['token']}
+        self.ordine = ORDINE_ARTICOLI if negozio.get('id') in NEGOZI_DDT_ARTICOLI else ORDINE
 
     def chiama(self, query, **variabili):
         for tentativo in range(6):
@@ -266,7 +271,7 @@ class Shopify:
             else:
                 pagina = self.chiama(ORDINI_DA_STAMPARE, after=dopo)['orders']
             for n in pagina['nodes']:
-                o = self.chiama(ORDINE, id=n['id'])['order']
+                o = self.chiama(self.ordine, id=n['id'])['order']
                 if fascia:
                     # Come erano al giro: anche se nel frattempo sono stati evasi, tutte le righe da spedire
                     if o and not o['cancelledAt'] and TAG_AUTOMAZIONE in {t.lower() for t in o['tags']}:
@@ -393,7 +398,86 @@ def disegna_nota(c, o, SX, DX, y):
     return y - alto
 
 
-def disegna_ddt(c, o, shop, richieste, cache, non_pagato=False):
+CELESTE, ROSA, EVIDENZIATORE = (0.62, 0.84, 0.97), (0.98, 0.74, 0.86), (1, 0.95, 0.62)
+CHIAVI_NOME = ('testo da stampare', 'riga superiore', 'riga inferiore')
+CHIAVE_POSIZIONE = 'dove vuoi stampare il nome?'
+
+
+def semplice(testo):
+    """Riga di testo normale: pezzi (testo, font, sfondo) e sfondo dell'intera riga."""
+    return ([(testo, 'Noto', None)], None)
+
+
+def righe_articolo(l):
+    """Bienjugado. Riga 1: modello e UOMO/DONNA in celeste o rosa. Riga 2: tessuto, colore in grassetto, taglia.
+    Riga 3: grafica. Riga 4: nome da stampare e dove, tutta evidenziata. Poi gli altri campi (es. bandiera).
+    Ritorna le righe e i campi personalizzati già usati."""
+    opz = {x['name'].strip().lower(): x['value'].strip() for x in ((l.get('variant') or {}).get('selectedOptions') or [])}
+    if not opz and l.get('variantTitle'):
+        opz = {'variante': l['variantTitle']}
+    modello, _, suffisso = l['title'].partition(' - ')
+    parole = modello.split()
+    genere = next((w.upper() for w in parole if w.lower() in ('uomo', 'donna')), None)
+    if genere:
+        modello = ' '.join(w for w in parole if w.lower() not in ('uomo', 'donna'))
+    else:
+        tag = {t.strip().lower() for t in ((l.get('product') or {}).get('tags') or [])}
+        genere = 'UOMO' if 'uomo' in tag and 'donna' not in tag else 'DONNA' if 'donna' in tag and 'uomo' not in tag else None
+    # Col colore tra le opzioni il pezzo dopo il trattino è la grafica, altrimenti è il colore del capo ("Second Skin - Navy")
+    colore = opz.pop('colore', None)
+    grafica = suffisso.strip()
+    if not colore and grafica:
+        colore, grafica = grafica, ''
+    stampa = opz.pop('colore stampa', None) or opz.pop('stampa', None)
+    if stampa:
+        grafica = f"{grafica} - stampa {stampa}" if grafica else f"Stampa {stampa}"
+    tessuto = opz.pop('materiale', None) or opz.pop('tessuto', None)
+    taglia = opz.pop('taglia', None)
+
+    righe = []
+    pezzi = [(modello, 'Noto', None)]
+    if genere:
+        pezzi += [(' ', 'Noto', None), (genere, 'NotoB', CELESTE if genere == 'UOMO' else ROSA)]
+    righe.append((pezzi, None))
+    pezzi = []
+    for testo, font in ((opz.pop('stile', None), 'Noto'), (tessuto, 'Noto'), (colore, 'NotoB'), (taglia, 'Noto')):
+        if testo:
+            pezzi += [(' - ', 'Noto', None)] * bool(pezzi) + [(testo, font, None)]
+    for k, v in opz.items():   # opzioni mai viste: si scrivono lo stesso
+        pezzi += [(' - ', 'Noto', None)] * bool(pezzi) + [(f"{k.capitalize()} {v}", 'Noto', None)]
+    if pezzi:
+        righe.append((pezzi, None))
+    if grafica:
+        righe.append(semplice(grafica))
+    nomi = [a for a in attributi_visibili(l) if a['key'].strip().lower() in CHIAVI_NOME and a['value'].strip()]
+    dove = [a for a in attributi_visibili(l) if a['key'].strip().lower() == CHIAVE_POSIZIONE and a['value'].strip()]
+    if not nomi:
+        return righe, set()
+    pezzi = [(' / '.join(a['value'].strip() for a in nomi), 'NotoB', None)]
+    if dove:
+        pezzi.append((f" ({dove[0]['value'].strip()})", 'Noto', None))
+    righe.append((pezzi, EVIDENZIATORE))
+    return righe, {a['key'] for a in nomi + dove}
+
+
+def disegna_riga(c, x, y, pezzi, sfondo):
+    if sfondo:
+        c.setFillColorRGB(*sfondo)
+        c.rect(x - 4, y - 4, 300, 14, stroke=0, fill=1)
+    for testo, font, evidenzia in pezzi:
+        largo = c.stringWidth(testo, font, CORPO)
+        if evidenzia:
+            c.setFillColorRGB(*evidenzia)
+            c.roundRect(x, y - 3.5, largo + 8, 13, 2.5, stroke=0, fill=1)
+            x += 4
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont(font, CORPO)
+        c.drawString(x, y, testo)
+        x += largo + (4 if evidenzia else 0)
+    c.setFont('Noto', CORPO)
+
+
+def disegna_ddt(c, o, shop, richieste, cache, non_pagato=False, articoli=False):
     """Stessa impaginazione del documento di trasporto di Shopify."""
     W, H = A4
     SX, DX = 84, 519
@@ -453,19 +537,25 @@ def disegna_ddt(c, o, shop, richieste, cache, non_pagato=False):
     y -= 12
 
     for l in righe_ddt(o):
-        testi = simpleSplit(l['title'], 'Noto', CORPO, 300)
-        if l['variantTitle']:
-            testi += simpleSplit(l['variantTitle'], 'Noto', CORPO, 300)
+        if articoli:
+            testi, usati = righe_articolo(l)
+        else:
+            testi = [semplice(x) for x in simpleSplit(l['title'], 'Noto', CORPO, 300)]
+            if l['variantTitle']:
+                testi += [semplice(x) for x in simpleSplit(l['variantTitle'], 'Noto', CORPO, 300)]
+            usati = set()
         loghi = []
         for a in attributi_visibili(l):
+            if a['key'] in usati:
+                continue
             if e_link(a['value']):
                 logo = scarica_logo(a['value'], cache) if len(loghi) < 2 else None
                 if logo:
                     loghi.append((a['key'], logo))
                 else:
-                    testi.append(f"{a['key']}: da vedere sull'ordine")
+                    testi.append(semplice(f"{a['key']}: da vedere sull'ordine"))
             else:
-                testi += simpleSplit(f"{a['key']}: {a['value']}", 'Noto', CORPO, 300)
+                testi += [semplice(x) for x in simpleSplit(f"{a['key']}: {a['value']}", 'Noto', CORPO, 300)]
         alto = max(len(testi) * 14, 36, 64 if loghi else 0)
         if y - alto < 60:
             c.showPage()
@@ -477,8 +567,8 @@ def disegna_ddt(c, o, shop, richieste, cache, non_pagato=False):
         if img:
             c.drawImage(img, 91, y - 18 - alto / 2, 36, 36, preserveAspectRatio=True, anchor='c')
         c.setFont('Noto', CORPO)
-        for i, r in enumerate(testi):
-            c.drawString(139, y - 11 - i * 14, r)
+        for i, (pezzi, sfondo) in enumerate(testi):
+            disegna_riga(c, 139, y - 11 - i * 14, pezzi, sfondo)
         da_fare, totale = l['unfulfilledQuantity'], l['quantity']
         if da_fare > 1:
             # Più pezzi dello stesso articolo: quantità in evidenza perché non sfugga in produzione
@@ -1057,7 +1147,7 @@ def giro(args, applica, reg):
     for n, _, shop, _, ordini in per_negozio:
         # Pagati e non pagati insieme, in ordine di data: i non pagati hanno la fascia in cima
         for o in sorted(ordini + non_pagati[n['id']], key=lambda o: o['createdAt']):
-            disegna_ddt(c, o, shop, richieste.get((n['id'], o['name']), []), cache, o in non_pagati[n['id']])
+            disegna_ddt(c, o, shop, richieste.get((n['id'], o['name']), []), cache, o in non_pagati[n['id']], n['id'] in NEGOZI_DDT_ARTICOLI)
     pagine_ddt = c.getPageNumber() - 1
     c.save()
     conferma_pdf(tmp_ddt, finale_ddt, pagine_ddt)
