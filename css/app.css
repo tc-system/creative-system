@@ -2078,5 +2078,6 @@ html.dark .report-day { color: #fdba74; }
 .mod-arr.is-on { border: 2px solid #16a34a; background: #16a34a; color: #fff; }
 .mod-arr-data { display: block; margin-top: 2px; font-size: 0.66rem; font-weight: 700; color: #16a34a; line-height: 1; }
 .mod-arr-data:empty { display: none; }
+.mod-arr-tutte + .mod-arr-data { color: var(--text-muted); font-weight: 600; }
 .mod-table .mod-arr { width: 26px; height: 26px; }
 .om-table .mod-arr, .mod-table .mod-arr, .so .mod-arr { border-radius: 50% !important; corner-shape: round !important; }

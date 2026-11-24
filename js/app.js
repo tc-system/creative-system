@@ -607,6 +607,30 @@ async function toggleModArrivo(orderId, idx, btn) {
   showToast(r.arrivo ? (arrivate === tot ? 'Merce arrivata tutta: C ✓' : `Arrivato · ${arrivate} di ${tot} righe`) : 'Arrivo tolto');
   renderApp();
 }
+// Intestazione ARR.: segna arrivate in un colpo tutte le righe da ordinare (C fatta); poi si depennano una per una
+// e la Merce passa a PARZIALE.
+async function arrivoTutte(orderId) {
+  const order = TCFactory.getOrderById(orderId);
+  const rows = order?.orderModule?.rows || [];
+  if (!rows.some(r => !isPrevRow(r) && !r.arrivo)) { showToast('Righe già tutte arrivate'); return; }
+  const arrivo = { at: new Date().toISOString(), da: TCAuth.getNickname() };
+  const nuove = rows.map(r => isPrevRow(r) || r.arrivo ? r : { ...r, arrivo });
+  try {
+    await TCFactory.updateOrder(orderId, { orderModule: { ...order.orderModule, rows: nuove } });
+    await syncMerceArrivo(orderId, true);
+  } catch (e) { console.error('[arrivo]', e); showToast('Arrivo non salvato — riprova', 'error'); return; }
+  showToast('Merce arrivata tutta: C ✓');
+  renderApp();
+  if (typeof SchedaOrdine !== 'undefined' && SchedaOrdine.id === orderId) SchedaOrdine.render();
+}
+function modArrivoTesta(orderId, rows) {
+  const righe = orderRows(rows);
+  if (!righe.length) return 'Arr.';
+  const tutte = righe.every(r => r.arrivo);
+  return `<button type="button" class="mod-arr mod-arr-tutte ${tutte ? 'is-on' : ''}" aria-label="Segna arrivate tutte le righe"
+      title="${tutte ? 'Arrivate tutte — togli la spunta dalle righe mancanti' : 'Segna arrivate tutte le righe'}"
+      onclick="event.stopPropagation();arrivoTutte('${orderId}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button><span class="mod-arr-data">TUTTE</span>`;
+}
 function modArrivoCella(orderId, idx, r) {
   if (isPrevRow(r)) return '<td class="om-arr"></td>';
   const on = !!r.arrivo;
@@ -780,7 +804,7 @@ function omCorpoHtml(D, { approva = true } = {}) {
   return `
         <div class="om-scroll">
           <table class="om-table">
-            <thead><tr>${th('Arr.', 'om-arr')}${th('', 'om-tools')}${th('Fornitore')}${th('Codice')}${th('Descrizione')}${th('Colore')}${th('QNT', 'om-c')}${th('TG', 'om-c')}${th('Prezzo', 'om-r')}${th('Totale', 'om-r')}${th('Ord.', 'om-c')}${th('Lavorazione')}</tr></thead>
+            <thead><tr>${th(modArrivoTesta(order.id, rows), 'om-arr')}${th('', 'om-tools')}${th('Fornitore')}${th('Codice')}${th('Descrizione')}${th('Colore')}${th('QNT', 'om-c')}${th('TG', 'om-c')}${th('Prezzo', 'om-r')}${th('Totale', 'om-r')}${th('Ord.', 'om-c')}${th('Lavorazione')}</tr></thead>
             <tbody>${rowsHtml}</tbody>
           </table>
         </div>
