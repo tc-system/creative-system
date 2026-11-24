@@ -354,8 +354,9 @@ def anteprima(percorso, cmyk, alfa):
     Image.fromarray(img.astype(np.uint8)).save(percorso, quality=80)
 
 
-def crea_fogli(cartella, nome_base, voci, libreria):
+def crea_fogli(cartella, nome_base, voci, libreria, anteprime=True):
     """voci: [(ordine, titolo, variante, attributi, quantità)] nell'ordine di stampa.
+    anteprime=False: niente JPG accanto ai TIF (in "1. Stampare" sul NAS conterebbero come file da stampare).
     Ritorna (file creati, cose da fare a mano, ordini con problemi bloccanti)."""
     a_mano, falliti = [], set()
     elementi = []   # (ordine, cmyk, alfa)
@@ -445,7 +446,8 @@ def crea_fogli(cartella, nome_base, voci, libreria):
         suffisso = f' - foglio {f + 1} di {len(altezze)}' if len(altezze) > 1 else ''
         p = cartella / f'{nome_base} - {intervallo}{suffisso}.tif'
         scrivi_foglio(p, cmyk, alfa, libreria.icc)
-        anteprima(p.with_name(p.stem + ' - anteprima.jpg'), cmyk, alfa)
+        if anteprime:
+            anteprima(p.with_name(p.stem + ' - anteprima.jpg'), cmyk, alfa)
         creati.append((p, round(H / MM / 10, 1)))
     return creati, a_mano, falliti
 
