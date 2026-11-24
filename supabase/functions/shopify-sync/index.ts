@@ -47,7 +47,7 @@ query Orders($first: Int!, $after: String, $query: String!) {
       billingAddress { phone }
       shippingLine { title }
       fulfillmentOrders(first: 3) { nodes { deliveryMethod { methodType } } }
-      lineItems(first: 15) { nodes { title variantTitle sku quantity } }
+      lineItems(first: 15) { nodes { title variantTitle sku quantity customAttributes { key value } } }
       fulfillments(first: 5) {
         status createdAt displayStatus
         trackingInfo(first: 3) { company number url }
@@ -55,6 +55,17 @@ query Orders($first: Int!, $after: String, $query: String!) {
     }
   }
 }`;
+
+// Bandierine scelte su una riga: "Scegli la bandiera" / "Scegli le bandiere:" (anche più nomi separati da virgola);
+// "Quante bandiere vuoi stampare?" = 2 con un nome solo vuol dire due volte la stessa
+// deno-lint-ignore no-explicit-any
+function bandiereRiga(attr: any[] | null | undefined): string[] {
+  const a = attr || [];
+  const nomi = a.filter((x) => /^\s*scegli (la|le) bandier/i.test(x.key || ''))
+    .flatMap((x) => String(x.value || '').split(/[,;\n]+/)).map((x) => x.trim()).filter(Boolean);
+  const quante = parseInt(a.find((x) => /quante bandiere/i.test(x.key || ''))?.value || '', 10);
+  return nomi.length === 1 && quante > 1 ? Array(quante).fill(nomi[0]) : nomi;
+}
 
 // ── GraphQL con ripetizione se Shopify rallenta (THROTTLED) ──
 
@@ -101,7 +112,10 @@ function toRow(storeId: string, o: any) {
       stato: f.displayStatus || f.status, at: f.createdAt,
     }))),
     // deno-lint-ignore no-explicit-any
-    righe: (o.lineItems?.nodes || []).map((l: any) => ({ titolo: l.title, variante: l.variantTitle, sku: l.sku, qnt: l.quantity })),
+    // bandiere: le bandierine scelte sulla riga (Globo Product Options), per le scorte (sql/stampe-scorte-bandiere.sql)
+    // deno-lint-ignore no-explicit-any
+    righe: (o.lineItems?.nodes || []).map((l: any) => ({ titolo: l.title, variante: l.variantTitle, sku: l.sku, qnt: l.quantity,
+      ...(bandiereRiga(l.customAttributes).length ? { bandiere: bandiereRiga(l.customAttributes) } : {}) })),
     indirizzo: addr ? { nome: addr.name, via: [addr.address1, addr.address2].filter(Boolean).join(', '), citta: addr.city,
                         cap: addr.zip, provincia: addr.province, paese: addr.countryCodeV2 } : null,
     spedizione: o.shippingLine?.title || null,

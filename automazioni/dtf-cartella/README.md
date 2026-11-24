@@ -51,6 +51,10 @@ tutti i PC, anche Windows, senza collegare niente nel browser.
   controlla che i file delle stampe contate ci siano sul NAS (percorso dentro `DATI`, esito `file_ok`) e copia quelli scesi
   alla soglia in `01 - Ordini Siti` come `scorta <stampa> - <file>`, una volta sola (`ristampa_at`, azzerato dal gestionale
   quando i pezzi tornano sopra la soglia). La stessa cartellina riceve dal mattino i fogli DTF di Box Factory Lab.
+  Le **bandierine** di Bienjugado (regola `bandiere`) sono su richiesta: per ogni pezzo ordinato che manca
+  (pezzi sotto zero) copia il file una volta ("… (2).tif" se ce n'è già uno) e il gestionale le rimette a zero.
+  Se il file non è sul NAS lo prende dalla copia sul Mac mini (`/Users/Shared/Creative System/Bienjugado DTF`,
+  copia di `DTF/1. Stampa/2. Bienjugado`; vedi `COPIE_LOCALI`).
 - Esito in `app_settings.dtf_cartella_stato` (riga in DTF interno), salvato quando cambia o
   ogni 10 minuti; nel registro del Centro di controllo solo quando aggiunge o rinomina.
 - Database: `sql/dtf-cartella-server.sql` (`tc_dtf_cartella_dati`, `tc_dtf_cartella_salva`,

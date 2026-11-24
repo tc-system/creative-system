@@ -1205,39 +1205,77 @@ def cartella_ordini_siti(cartella, prova):
     return p
 
 
+# Copie dei file dei negozi sul Mac mini: se il NAS non ha il file (o non risponde) si prende da qui
+COPIE_LOCALI = {'DTF/1. Stampa/2. Bienjugado/': '/Users/Shared/Creative System/Bienjugado DTF/'}
+
+
+def file_scorta(dati_root, rel):
+    """Il file di una scorta: sul NAS (percorso dentro DATI), altrimenti nella copia sul Mac mini."""
+    src = os.path.join(dati_root, rel)
+    if os.path.isfile(src):
+        return src
+    for pref, locale in COPIE_LOCALI.items():
+        if rel.startswith(pref) and os.path.isfile(os.path.join(locale, rel[len(pref):])):
+            return os.path.join(locale, rel[len(pref):])
+    return None
+
+
+def copia_in(dest_dir, nome, src, nuovo):
+    """Copia src in dest_dir/nome; nuovo=True non riusa un file già lì (aggiunge " (2)", " (3)"...)."""
+    dest = os.path.join(dest_dir, nome)
+    if os.path.exists(dest) and not nuovo:
+        return dest   # già lì e non ancora stampato: basta quello
+    radice, est = os.path.splitext(nome)
+    n = 2
+    while os.path.exists(dest):
+        dest = os.path.join(dest_dir, f'{radice} ({n}){est}')
+        n += 1
+    tmp = dest + '.part'
+    shutil.copyfile(src, tmp)
+    os.rename(tmp, dest)
+    return dest
+
+
 def ristampa_stampe(cfg, cartella, prova, stato):
     """Scorte delle stampe dei negozi (Task → coda SCORTE, sql/stampe-scorte.sql): controlla che i file ci siano
-    sul NAS (percorso dentro DATI) e copia in "01 - Ordini Siti" quelli scesi alla soglia, una volta sola
-    (il gestionale segna ristampa_at e lo azzera quando i pezzi tornano sopra la soglia)."""
+    (NAS, percorso dentro DATI, o la copia sul Mac mini) e copia in "01 - Ordini Siti":
+    - le stampe scese alla soglia, una volta sola (il gestionale segna ristampa_at e lo azzera quando i pezzi
+      tornano sopra la soglia);
+    - le stampe "su richiesta" (bandierine): una copia per ogni pezzo ordinato che mancava (copie), che il
+      gestionale rimette in scorta come stampato per quell'ordine."""
     d = rpc(cfg, 'tc_stampe_ristampa_dati', {'p_chiave': cfg['chiave']})
     if not d.get('success'):
         return [f"ERRORE scorte stampe: {d.get('error')}"]
     dati_root = os.path.normpath(os.path.join(cartella, '..', '..', '..'))
-    controllati, caricati, righe = {}, [], []
+    controllati, caricati, coperti, righe = {}, [], {}, []
     for s in d.get('stampe') or []:
         rel = s['file'].strip().lstrip('/').replace('\\', '/')
         rel = re.sub(r'^(?:Volumes/)?DATI/', '', rel)   # anche se incollato con /Volumes/DATI davanti
-        src = os.path.join(dati_root, rel)
-        controllati[s['id']] = os.path.isfile(src)
-        if not (s.get('da_caricare') and controllati[s['id']]):
+        src = file_scorta(dati_root, rel)
+        controllati[s['id']] = bool(src)
+        copie = int(s.get('copie') or 0)
+        if not src or not (s.get('da_caricare') or copie > 0):
             continue
         dest_dir = cartella_ordini_siti(cartella, prova)
         nome = re.sub(r'[\\/:*?"<>|]+', ' ', f"scorta {s['nome']} - {os.path.basename(src)}")
-        dest = os.path.join(dest_dir, nome)
         if prova:
-            righe.append(f'scorta (prova): {rel} → {os.path.basename(dest_dir)}/{nome}')
+            righe.append(f"scorta (prova): {rel} → {os.path.basename(dest_dir)}/{nome}" + (f' x{copie}' if copie else ''))
             continue
         try:
-            if not os.path.exists(dest):   # già lì e non ancora stampato: basta quello
-                tmp = dest + '.part'
-                shutil.copyfile(src, tmp)
-                os.rename(tmp, dest)
-            caricati.append(s['id'])
-            righe.append(f'scorta sotto soglia: {rel} → {os.path.basename(dest_dir)}/{nome}')
+            if copie > 0:
+                for _ in range(copie):
+                    copia_in(dest_dir, nome, src, True)
+                coperti[s['id']] = copie
+                righe.append(f'scorta mancante x{copie}: {rel} → {os.path.basename(dest_dir)}/{nome}')
+            else:
+                copia_in(dest_dir, nome, src, False)
+                caricati.append(s['id'])
+                righe.append(f'scorta sotto soglia: {rel} → {os.path.basename(dest_dir)}/{nome}')
         except OSError as e:
             righe.append(f'ERRORE scorta {rel}: {e.strerror}')
-    if not prova and (caricati or controllati != stato.get('stampe_file')):
-        r = rpc(cfg, 'tc_stampe_ristampa_salva', {'p_chiave': cfg['chiave'], 'p_caricati': caricati, 'p_controllati': controllati})
+    if not prova and (caricati or coperti or controllati != stato.get('stampe_file')):
+        r = rpc(cfg, 'tc_stampe_ristampa_salva', {'p_chiave': cfg['chiave'], 'p_caricati': caricati,
+                                                  'p_controllati': controllati, 'p_coperti': coperti})
         if r.get('success'):
             stato['stampe_file'] = controllati
         else:
