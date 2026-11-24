@@ -23,6 +23,9 @@ const ScorteStampe = {
 // Ciucciami: articoli (calzini per taglia, polsini) scalati da tutti i siti e dagli ordini del gestionale/Kamon
 const SCORTE_NEGOZI = [{ id: 'bienjugado' }, { id: 'ciucciamilcalzino' }];
 
+// Articoli (non stampe): calzini e polsini di Ciucciami, senza file. Le bandierine sono stampe "su richiesta".
+const scorteArticolo = (r) => r.regola === 'calzini' || r.regola === 'polsini';
+
 const SCORTE_FILTRI = { tutte: 'Tutte', contate: 'Da contare', nuove: 'Nuove' };
 
 async function scorteCarica(negozio) {
@@ -70,7 +73,7 @@ function scorteFamiglie() {
     nome, righe,
     conteggia: righe.some(r => r.conteggia),
     nuovo: righe.some(r => r.nuovo),
-    articolo: righe.some(r => r.regola),
+    articolo: righe.some(scorteArticolo),
     venduti: righe.reduce((t, r) => t + (r.venduti || 0), 0),
     sotto: righe.filter(scorteSotto).length,
   }));
@@ -138,13 +141,14 @@ function scorteFamigliaHtml(f) {
         <label class="check-inline scorte-check"><input type="checkbox" id="${id}" ${f.conteggia ? 'checked' : ''}
           onchange="scorteConteggia(${escapeHtml(JSON.stringify(f.nome))}, this.checked)"><span class="scorte-nome">${escapeHtml(f.nome)}</span></label>
         ${f.nuovo ? '<span class="chip chip-muted">nuovo</span>' : ''}
-        <span class="scorte-meta">${colori ? `${colori} ${f.articolo ? (colori === 1 ? 'taglia' : 'taglie') : (colori === 1 ? 'colore' : 'colori')} · ` : ''}${f.venduti} vendut${f.venduti === 1 ? 'o' : 'i'}</span>
+        <span class="scorte-meta">${colori ? `${colori} ${f.articolo ? (colori === 1 ? 'taglia' : 'taglie') : f.righe[0].regola === 'bandiere' ? (colori === 1 ? 'bandiera' : 'bandiere') : (colori === 1 ? 'colore' : 'colori')} · ` : ''}${f.venduti} vendut${f.venduti === 1 ? 'o' : 'i'}</span>
       </span>`;
   if (singola) return `<div class="scorte-fam ${f.conteggia ? 'is-on' : ''}">${scorteRigaHtml(f.righe[0], nome, f.conteggia)}</div>`;
   return `
     <div class="scorte-fam ${f.conteggia ? 'is-on' : ''}">
       <div class="scorte-tr" role="row">${nome}</div>
-      ${f.conteggia ? f.righe.map(r => scorteRigaHtml(r, `<span role="cell" class="scorte-colore">${escapeHtml(r.colore || '—')}</span>`, true)).join('') : ''}
+      ${f.conteggia ? f.righe.map(r => scorteRigaHtml(r, `<span role="cell" class="scorte-colore">${escapeHtml(r.colore || '—')}${r.capi?.length
+        ? ` <span class="scorte-meta">su ${escapeHtml(r.capi.map(c => c.toLowerCase()).join(', '))}</span>` : ''}</span>`, true)).join('') : ''}
     </div>`;
 }
 
@@ -152,20 +156,21 @@ function scorteFamigliaHtml(f) {
 function scorteRigaHtml(r, prima, campi) {
   if (!campi) return `<div class="scorte-tr" role="row">${prima}</div>`;
   const campo = (k, tipo, extra = '') => `<input class="form-input scorte-in scorte-in-${k}" id="sr-${r.id}-${k}" type="${tipo}" ${extra}
-    value="${r[k] == null ? '' : escapeHtml(String(r[k]))}" aria-label="${k}" onchange="scorteSalva('${r.id}', '${k}', this.value)">`;
+    value="${r[k] == null ? '' : escapeHtml(String(r[k]))}" ${k === 'file' && r.file ? `title="${escapeHtml(r.file)}"` : ''} aria-label="${k}" onchange="scorteSalva('${r.id}', '${k}', this.value)">`;
   let stato = '';
   if (r.ristampa_at) stato = `<span class="scorte-stato is-giallo" title="Caricato in 1. Stampare/01 - Ordini Siti">In Stampare dal ${new Date(r.ristampa_at).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</span>`;
-  else if (scorteSotto(r)) stato = `<span class="scorte-stato is-rosso">${r.file || r.regola ? 'Sotto soglia' : 'Sotto soglia, manca il file'}</span>`;
+  else if (scorteSotto(r)) stato = `<span class="scorte-stato is-rosso">${r.file || scorteArticolo(r) ? 'Sotto soglia' : 'Sotto soglia, manca il file'}</span>`;
   if (r.file && r.file_ok === false) stato += `<span class="scorte-stato is-rosso">File non trovato</span>`;
   return `
     <div class="scorte-tr ${scorteSotto(r) ? 'is-sotto' : ''}" role="row">
       ${prima}
       <span role="cell" data-label="Pezzi">${campo('quantita', 'number', 'inputmode="numeric" step="1"')}</span>
-      <span role="cell" data-label="Soglia">${campo('soglia', 'number', 'inputmode="numeric" step="1" min="0" placeholder="—"')}</span>
-      <span role="cell" data-label="${r.regola ? 'Pezzi per arrivo' : 'Pezzi per file'}">${campo('pezzi_file', 'number', 'inputmode="numeric" step="1" min="1" placeholder="—"')}</span>
-      ${r.regola ? '<span role="cell" class="scorte-vuota"></span>' : `<span role="cell" data-label="File sul NAS">${campo('file', 'text', 'placeholder="Percorso del file" spellcheck="false"')}</span>`}
+      <span role="cell" data-label="Soglia">${r.regola === 'bandiere' ? '<span class="scorte-richiesta" title="Se un ordine la vuole e non c\'è, il file va subito in 1. Stampare">su richiesta</span>'
+        : campo('soglia', 'number', 'inputmode="numeric" step="1" min="0" placeholder="—"')}</span>
+      <span role="cell" data-label="${scorteArticolo(r) ? 'Pezzi per arrivo' : 'Pezzi per file'}">${campo('pezzi_file', 'number', 'inputmode="numeric" step="1" min="1" placeholder="—"')}</span>
+      ${scorteArticolo(r) ? '<span role="cell" class="scorte-vuota"></span>' : `<span role="cell" data-label="File sul NAS">${campo('file', 'text', 'placeholder="Percorso del file" spellcheck="false"')}</span>`}
       <span role="cell" class="scorte-azioni">${r.pezzi_file ? `<button type="button" class="btn btn-secondary scorte-ristampa"
-        title="${r.regola ? 'Merce arrivata' : 'Ristampa arrivata'}: aggiunge ${r.pezzi_file} pezzi" onclick="scorteSalva('${r.id}', 'aggiungi', ${r.pezzi_file})">+${r.pezzi_file}</button>` : ''}${stato}</span>
+        title="${scorteArticolo(r) ? 'Merce arrivata' : 'Ristampa arrivata'}: aggiunge ${r.pezzi_file} pezzi" onclick="scorteSalva('${r.id}', 'aggiungi', ${r.pezzi_file})">+${r.pezzi_file}</button>` : ''}${stato}</span>
     </div>`;
 }
 
