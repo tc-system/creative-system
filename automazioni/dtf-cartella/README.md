@@ -47,6 +47,10 @@ tutti i PC, anche Windows, senza collegare niente nel browser.
   Elenco cartelle clienti riletto ogni 30 minuti. I task TIF e Rinominare mostrano il percorso (Copia percorso: Finder
   su Mac, Esplora file su Windows) e a lavoro fatto **non si chiudono**: passano a "salvali sul NAS" e si chiudono
   col Fatto (`sql/dtf-archivio.sql`). In DTF-FILE tre categorie: 1 Caricare file, 2 Creare TIF, 3 Rinominare file.
+- **Scorte stampe dei negozi** (dal 2026-11-24, `sql/stampe-scorte.sql`, Brand → Bienjugado → Scorte stampe): a ogni giro
+  controlla che i file delle stampe contate ci siano sul NAS (percorso dentro `DATI`, esito `file_ok`) e copia quelli scesi
+  alla soglia in `01 - Ordini Siti` come `scorta <stampa> - <file>`, una volta sola (`ristampa_at`, azzerato dal gestionale
+  quando i pezzi tornano sopra la soglia). La stessa cartellina riceve dal mattino i fogli DTF di Box Factory Lab.
 - Esito in `app_settings.dtf_cartella_stato` (riga in DTF interno), salvato quando cambia o
   ogni 10 minuti; nel registro del Centro di controllo solo quando aggiunge o rinomina.
 - Database: `sql/dtf-cartella-server.sql` (`tc_dtf_cartella_dati`, `tc_dtf_cartella_salva`,

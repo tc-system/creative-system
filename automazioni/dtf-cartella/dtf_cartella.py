@@ -1191,6 +1191,60 @@ def prepara_ordini(cfg, dati, cartella_nas, prova, stato):
         avvisati.pop(o['id'], None)
 
 
+ORDINI_SITI = 'Ordini Siti'
+
+
+def cartella_ordini_siti(cartella, prova):
+    """La cartellina prioritaria dei negozi in 1. Stampare (anche numerata, "01 - Ordini Siti"); se manca la crea."""
+    for n in os.listdir(cartella):
+        if os.path.isdir(os.path.join(cartella, n)) and base(n).strip().lower() == ORDINI_SITI.lower():
+            return os.path.join(cartella, n)
+    p = os.path.join(cartella, f'01 - {ORDINI_SITI}')
+    if not prova:
+        os.makedirs(p, exist_ok=True)
+    return p
+
+
+def ristampa_stampe(cfg, cartella, prova, stato):
+    """Scorte delle stampe dei negozi (Brand → Scorte stampe, sql/stampe-scorte.sql): controlla che i file ci siano
+    sul NAS (percorso dentro DATI) e copia in "01 - Ordini Siti" quelli scesi alla soglia, una volta sola
+    (il gestionale segna ristampa_at e lo azzera quando i pezzi tornano sopra la soglia)."""
+    d = rpc(cfg, 'tc_stampe_ristampa_dati', {'p_chiave': cfg['chiave']})
+    if not d.get('success'):
+        return [f"ERRORE scorte stampe: {d.get('error')}"]
+    dati_root = os.path.normpath(os.path.join(cartella, '..', '..', '..'))
+    controllati, caricati, righe = {}, [], []
+    for s in d.get('stampe') or []:
+        rel = s['file'].strip().lstrip('/').replace('\\', '/')
+        rel = re.sub(r'^(?:Volumes/)?DATI/', '', rel)   # anche se incollato con /Volumes/DATI davanti
+        src = os.path.join(dati_root, rel)
+        controllati[s['id']] = os.path.isfile(src)
+        if not (s.get('da_caricare') and controllati[s['id']]):
+            continue
+        dest_dir = cartella_ordini_siti(cartella, prova)
+        nome = re.sub(r'[\\/:*?"<>|]+', ' ', f"scorta {s['nome']} - {os.path.basename(src)}")
+        dest = os.path.join(dest_dir, nome)
+        if prova:
+            righe.append(f'scorta (prova): {rel} → {os.path.basename(dest_dir)}/{nome}')
+            continue
+        try:
+            if not os.path.exists(dest):   # già lì e non ancora stampato: basta quello
+                tmp = dest + '.part'
+                shutil.copyfile(src, tmp)
+                os.rename(tmp, dest)
+            caricati.append(s['id'])
+            righe.append(f'scorta sotto soglia: {rel} → {os.path.basename(dest_dir)}/{nome}')
+        except OSError as e:
+            righe.append(f'ERRORE scorta {rel}: {e.strerror}')
+    if not prova and (caricati or controllati != stato.get('stampe_file')):
+        r = rpc(cfg, 'tc_stampe_ristampa_salva', {'p_chiave': cfg['chiave'], 'p_caricati': caricati, 'p_controllati': controllati})
+        if r.get('success'):
+            stato['stampe_file'] = controllati
+        else:
+            righe.append(f"ERRORE scorte stampe non salvate: {r.get('error')}")
+    return righe
+
+
 def leggi_config():
     """config.json: url/anon/chiave, oppure "env" = file .env con CS_SUPABASE_URL, CS_ANON_KEY,
     CS_AUTOMAZIONE_KEY (sul Mac mini quello dello script del mattino: la chiave non si copia).
@@ -1298,6 +1352,12 @@ def main():
     # La lista ha gli ordini e, al loro posto, le cartelle senza ordine ({id: 'cartella:<nome>', cartella: true})
     pos = {o['id']: i for i, o in enumerate(lista)}
     ordini_lista = [o for o in lista if not o.get('cartella')]
+
+    # Scorte delle stampe dei negozi scese alla soglia: il file va in "01 - Ordini Siti" (letto subito sotto)
+    try:
+        scorte_righe = ristampa_stampe(cfg, a.cartella, a.prova, stato)
+    except Exception as e:
+        scorte_righe = [f'ERRORE scorte stampe: {e}']
 
     gruppi = gruppi_di(a.cartella)
     # PDF → TIF chiesti dal task "Creare il file TIF"
@@ -1458,7 +1518,7 @@ def main():
              'errori': errori, 'cartelle': cartelle, 'mancanti': mancanti}
     for r in sciolti_spostati:
         print('  raggruppa', r)
-    for r in tiff_righe:
+    for r in tiff_righe + scorte_righe:
         print(' ', r)
     for r in colla_spostati:
         print('  colla nera', r)
@@ -1485,15 +1545,15 @@ def main():
     with open(STATO, 'w') as f:
         json.dump({**stato, 'visti': percorsi, 'richiesta': richiesta}, f)
 
-    if rinominate or errori or aggiunti or colla_spostati or sciolti_spostati or tiff_righe:   # registro del Centro di controllo solo quando cambia qualcosa
+    if rinominate or errori or aggiunti or colla_spostati or sciolti_spostati or tiff_righe or scorte_righe:   # registro del Centro di controllo solo quando cambia qualcosa
         try:
             ini = rpc(cfg, 'tc_automazione_inizio', {'p_chiave': cfg['chiave'], 'p_nome': 'dtf-cartella'})
             if ini.get('success'):
                 righe = ([f'{aggiunti} file nuovi su {len(ordini)} ordini'] + [f'raggruppato: {r}' for r in sciolti_spostati]
-                         + tiff_righe + [f'colla nera: {r}' for r in colla_spostati]
+                         + tiff_righe + scorte_righe + [f'colla nera: {r}' for r in colla_spostati]
                          + rinominate + [f'ERRORE {e}' for e in errori])
                 rpc(cfg, 'tc_automazione_fine', {
-                    'p_chiave': cfg['chiave'], 'p_id': ini['id'], 'p_stato': 'errore' if errori or any(r.startswith('ERRORE') for r in tiff_righe) else 'ok',
+                    'p_chiave': cfg['chiave'], 'p_id': ini['id'], 'p_stato': 'errore' if errori or any(r.startswith('ERRORE') for r in tiff_righe + scorte_righe) else 'ok',
                     'p_riepilogo': {'file_nuovi': aggiunti, 'colla_nera': len(colla_spostati), 'raggruppati': len(sciolti_spostati),
                                     'tiff': sum(1 for r in tiff_righe if not r.startswith('ERRORE')), 'rinominate': len(rinominate),
                                     'errori': len(errori)},

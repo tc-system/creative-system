@@ -1,0 +1,40 @@
+/* ── Brand → Scorte stampe ── */
+.scorte { padding: 20px 22px; }
+.scorte-testa { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.scorte-testa .search-box { flex: 1; min-width: 200px; }
+.scorte-filtri { display: inline-flex; gap: 6px; }
+.scorte-filtri .chip-btn { padding: 7px 14px; border-radius: 999px; background: var(--bg-secondary); color: var(--text-secondary); font-weight: 700; font-size: .85rem; }
+.scorte-filtri .chip-btn.is-on { background: var(--text-primary); color: var(--bg-primary); }
+.scorte-info { margin: 12px 0 6px; color: var(--text-secondary); font-size: .88rem; }
+.scorte-rosso { color: var(--priority-urgent); font-weight: 700; }
+
+.scorte-lista { list-style: none; margin: 0; padding: 0; }
+.scorte-fam { border-top: 1px solid var(--border); padding: 8px 0; }
+.scorte-lista .scorte-fam:first-child { border-top: 0; }
+.scorte-fam-riga { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-height: 36px; }
+.scorte-check { color: var(--text-primary); font-size: .95rem; white-space: normal; }
+.scorte-fam.is-on .scorte-nome { font-weight: 700; }
+.scorte-meta { color: var(--text-muted); font-size: .82rem; font-variant-numeric: tabular-nums; }
+.scorte-apri, .scorte-ristampa { border-radius: 999px; padding: 5px 14px; font-size: .82rem; margin-left: auto; }
+.scorte-ristampa { margin-left: 0; }
+
+.scorte-tabella { margin: 8px 0 4px 24px; display: flex; flex-direction: column; gap: 6px; }
+.scorte-tr { display: grid; grid-template-columns: minmax(90px, 140px) 84px 84px 96px minmax(180px, 1fr) 250px; gap: 8px; align-items: center; }
+.scorte-th { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
+.scorte-colore { font-weight: 600; font-size: .88rem; }
+.scorte-in { width: 100%; padding: 6px 10px; font-size: .88rem; font-variant-numeric: tabular-nums; }
+.scorte-azioni { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.scorte-stato { font-size: .78rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
+.scorte-stato.is-rosso { background: color-mix(in srgb, var(--priority-urgent) 14%, transparent); color: var(--priority-urgent); }
+.scorte-stato.is-giallo { background: color-mix(in srgb, #eab308 20%, transparent); color: #a16207; }
+html.dark .scorte-stato.is-giallo { color: #facc15; }
+
+@media (max-width: 760px) {
+  .scorte { padding: 16px; }
+  .scorte-tabella { margin-left: 0; }
+  .scorte-th { display: none; }
+  .scorte-tr { grid-template-columns: 1fr 1fr 1fr; padding: 8px 0; border-top: 1px dashed var(--border); }
+  .scorte-colore { grid-column: 1 / -1; }
+  .scorte-tr > span:nth-child(5), .scorte-azioni { grid-column: 1 / -1; }
+  .scorte-tr > [data-label]::before { content: attr(data-label); display: block; font-size: .7rem; font-weight: 700; color: var(--text-muted); margin-bottom: 2px; }
+}
