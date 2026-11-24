@@ -82,7 +82,10 @@ ORDINE = '''query($id:ID!){order(id:$id){
 # Bienjugado: sul DDT le righe dell'articolo sono ricomposte (modello, uomo/donna, tessuto, colore, taglia, grafica, nome)
 # e servono le opzioni della variante e i tag del prodotto
 NEGOZI_DDT_ARTICOLI = {'bienjugado'}
-ORDINE_ARTICOLI = ORDINE.replace('customAttributes{key value}}}', 'customAttributes{key value} variant{selectedOptions{name value}} product{tags}}}')
+# Bienjugado e Box Factory Lab: articoli in ordine di tipo (t-shirt, short, felpe, pantaloni, resto, calzini)
+# e una casella da spuntare accanto alla quantità
+NEGOZI_DDT_ORDINATI = {'bienjugado', 'boxfactorylab'}
+ORDINE_ARTICOLI = ORDINE.replace('customAttributes{key value}}}', 'customAttributes{key value} variant{selectedOptions{name value}} product{tags productType}}}')
 NEGOZIO = '{shop{name contactEmail primaryDomain{host} billingAddress{address1 address2 zip city provinceCode country countryCodeV2}} currentAppInstallation{accessScopes{handle}}}'
 AGGIUNGI_TAG = 'mutation($id:ID!,$tags:[String!]!){tagsAdd(id:$id,tags:$tags){userErrors{message}}}'
 
@@ -244,7 +247,7 @@ class Shopify:
             raise RuntimeError('token mancante')
         self.url = f"https://{negozio['dominio']}/admin/api/{API}/graphql.json"
         self.headers = {'Content-Type': 'application/json', 'X-Shopify-Access-Token': negozio['token']}
-        self.ordine = ORDINE_ARTICOLI if negozio.get('id') in NEGOZI_DDT_ARTICOLI else ORDINE
+        self.ordine = ORDINE_ARTICOLI if negozio.get('id') in NEGOZI_DDT_ARTICOLI | NEGOZI_DDT_ORDINATI else ORDINE
 
     def chiama(self, query, **variabili):
         for tentativo in range(6):
@@ -333,6 +336,27 @@ def e_aggiunta(l):
 
 def righe_ddt(o):
     return [l for l in o['lineItems']['nodes'] if l['requiresShipping'] and l['unfulfilledQuantity'] > 0 and not e_aggiunta(l)]
+
+
+# Il primo gruppo che trova una sua parola nel titolo (poi nel tipo di prodotto, poi nei tag) decide il posto.
+# Calzini e short prima di t-shirt e pantaloni: "Calzini T-shirt Fun" e "pantaloncini" non si confondono.
+GRUPPI_ARTICOLI = [(5, ('calzin', 'calza', 'calze', 'sock')),
+                   (1, ('short', 'pantaloncin', 'bermuda')),
+                   (2, ('felp', 'hoodie', 'sweatshirt', 'crewneck')),
+                   (3, ('pantalon', 'jogger', 'trouser', 'pants', 'leggings')),
+                   (0, ('t shirt', 'tshirt', 'tee', 'maglietta', 'magliett'))]
+POSTO_RESTO = 4
+
+
+def posto_articolo(l):
+    """0 t-shirt, 1 short, 2 felpe, 3 pantaloni, 4 tutto il resto, 5 calzini."""
+    prodotto = l.get('product') or {}
+    for testo in (l['title'], prodotto.get('productType'), ' '.join(prodotto.get('tags') or [])):
+        parole = f" {re.sub(r'[^a-z0-9]+', ' ', (testo or '').lower())} "
+        for posto, chiavi in GRUPPI_ARTICOLI:
+            if any(f' {k}' in parole for k in chiavi):
+                return posto
+    return POSTO_RESTO
 
 
 def attributi_visibili(l):
@@ -479,7 +503,7 @@ def disegna_riga(c, x, y, pezzi, sfondo):
     c.setFont('Noto', CORPO)
 
 
-def disegna_ddt(c, o, shop, richieste, cache, non_pagato=False, articoli=False):
+def disegna_ddt(c, o, shop, richieste, cache, non_pagato=False, articoli=False, ordinati=False):
     """Stessa impaginazione del documento di trasporto di Shopify."""
     W, H = A4
     SX, DX = 84, 519
@@ -538,7 +562,10 @@ def disegna_ddt(c, o, shop, richieste, cache, non_pagato=False, articoli=False):
     intestazione_articoli(y)
     y -= 12
 
-    for l in righe_ddt(o):
+    righe = righe_ddt(o)
+    if ordinati:
+        righe = sorted(righe, key=posto_articolo)   # stabile: dentro lo stesso tipo resta l'ordine di Shopify
+    for l in righe:
         if articoli:
             testi, usati = righe_articolo(l)
         else:
@@ -572,18 +599,24 @@ def disegna_ddt(c, o, shop, richieste, cache, non_pagato=False, articoli=False):
         for i, (pezzi, sfondo) in enumerate(testi):
             disegna_riga(c, 139, y - 11 - i * 14, pezzi, sfondo)
         da_fare, totale = l['unfulfilledQuantity'], l['quantity']
+        q_dx = 513
+        if ordinati:
+            # Casella da spuntare a destra della quantità, quando l'articolo è nel pacco
+            c.setLineWidth(0.9)
+            c.rect(503, y - alto / 2 - 7, 10, 10, stroke=1, fill=0)
+            q_dx = 496
         if da_fare > 1:
             # Più pezzi dello stesso articolo: quantità in evidenza perché non sfugga in produzione
             testo_q = f"{da_fare} copie" if da_fare == totale else f"{da_fare} di {totale} copie"
             c.setFont('NotoB', 10)
             largo = c.stringWidth(testo_q, 'NotoB', 10) + 12
             c.setFillColorRGB(0.8, 0.1, 0.1)
-            c.roundRect(513 - largo, y - alto / 2 - 9, largo, 17, 3, stroke=0, fill=1)
+            c.roundRect(q_dx - largo, y - alto / 2 - 9, largo, 17, 3, stroke=0, fill=1)
             c.setFillColorRGB(1, 1, 1)
-            c.drawRightString(507, y - alto / 2 - 4, testo_q)
+            c.drawRightString(q_dx - 6, y - alto / 2 - 4, testo_q)
             c.setFillColorRGB(0, 0, 0)
         else:
-            c.drawRightString(513, y - alto / 2 - 3, f"{da_fare} di {totale}")
+            c.drawRightString(q_dx, y - alto / 2 - 3, f"{da_fare} di {totale}")
         c.setFont('Noto', 7.5)
         for i, (nome, logo) in enumerate(loghi):
             x = 340 + i * 62
@@ -1149,7 +1182,8 @@ def giro(args, applica, reg):
     for n, _, shop, _, ordini in per_negozio:
         # Pagati e non pagati insieme, in ordine di data: i non pagati hanno la fascia in cima
         for o in sorted(ordini + non_pagati[n['id']], key=lambda o: o['createdAt']):
-            disegna_ddt(c, o, shop, richieste.get((n['id'], o['name']), []), cache, o in non_pagati[n['id']], n['id'] in NEGOZI_DDT_ARTICOLI)
+            disegna_ddt(c, o, shop, richieste.get((n['id'], o['name']), []), cache, o in non_pagati[n['id']], n['id'] in NEGOZI_DDT_ARTICOLI,
+                        n['id'] in NEGOZI_DDT_ORDINATI)
     pagine_ddt = c.getPageNumber() - 1
     c.save()
     conferma_pdf(tmp_ddt, finale_ddt, pagine_ddt)
