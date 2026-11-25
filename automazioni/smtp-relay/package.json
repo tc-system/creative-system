@@ -1,7 +1,0 @@
-{
-  "name": "smtp-relay",
-  "private": true,
-  "type": "module",
-  "scripts": { "start": "node server.js" },
-  "dependencies": { "nodemailer": "^6.9.16" }
-}
