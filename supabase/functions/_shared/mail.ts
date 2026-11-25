@@ -184,8 +184,23 @@ async function invia(db: SupabaseClient, casella: Row, m: Invio, firma: Firma, a
     auth: { user: casella.utente || casella.indirizzo, pass },   // utente: login diverso dall'indirizzo (info@tcfactory.it → riccardo@tcfactory.it)
   });
   passo('preparazione');
-  await smtp.sendMail({ envelope: { from: casella.indirizzo, to: m.a }, raw });
+  // Aruba a volte rifiuta per un po' l'indirizzo del server (IP AWS condiviso): "550 5.1.0 ... temporaneamente
+  // rifiutata". Il rifiuto arriva alla connessione, prima che la mail parta: si riprova senza rischio di doppioni.
+  const attese = [3000, 8000, 15000];
+  let tentativo = 0;
+  for (; ; tentativo++) {
+    try {
+      await smtp.sendMail({ envelope: { from: casella.indirizzo, to: m.a }, raw });
+      break;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (tentativo >= attese.length || !/temporaneamente rifiutata|temporarily rejected/i.test(msg)) throw e;
+      console.warn(`SMTP rifiutato (tentativo ${tentativo + 1}), riprovo tra ${attese[tentativo] / 1000}s: ${msg}`);
+      await new Promise(r => setTimeout(r, attese[tentativo]));
+    }
+  }
   passo('smtp');
+  if (tentativo) ms.riprove_smtp = tentativo;   // quante volte Aruba ha rifiutato prima di accettare
 
   const { data: riga } = await db.from('mail_messaggi').insert({
     casella_id: casella.id, direzione: 'out', message_id: messageId, in_reply_to: m.inReplyTo || null,
