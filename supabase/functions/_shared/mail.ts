@@ -152,6 +152,35 @@ async function componi(db: SupabaseClient, casella: Row, testoDato: string, firm
   return { testo, html, immagine: allegato };
 }
 
+// Invio tramite il relay SMTP su Railway (automazioni/smtp-relay). Ritorna 'inviata', oppure il motivo per cui
+// si può ripiegare sull'invio diretto (relay non configurato o irraggiungibile, rifiuto prima del testo).
+// Se il relay ha già passato il testo ad Aruba e poi fallisce, l'errore sale: riprovare potrebbe fare un doppione.
+async function viaRelay(casella: Row, pass: string, a: string, raw: Uint8Array): Promise<'inviata' | string | null> {
+  const url = Deno.env.get('SMTP_RELAY_URL'), segreto = Deno.env.get('SMTP_RELAY_SECRET');
+  if (!url || !segreto) return null;
+  let bin = '';
+  for (let i = 0; i < raw.length; i += 0x8000) bin += String.fromCharCode(...raw.subarray(i, i + 0x8000));
+  let r: Response;
+  try {
+    r = await fetch(`${url.replace(/\/$/, '')}/invia`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${segreto}` },
+      body: JSON.stringify({ host: casella.smtp_host, port: 465, user: casella.utente || casella.indirizzo, pass, from: casella.indirizzo, to: a, raw: btoa(bin) }),
+      signal: AbortSignal.timeout(45000),
+    });
+  } catch (e) {
+    console.warn('Relay SMTP irraggiungibile, invio diretto:', e);
+    return 'irraggiungibile';
+  }
+  if (r.ok) return 'inviata';
+  const j = await r.json().catch(() => ({}));
+  if (r.status !== 502 || j.prima_del_testo) {
+    console.warn(`Relay SMTP ${r.status}, invio diretto:`, j.error);
+    return 'rifiutata';
+  }
+  throw new Error(j.error || `Relay SMTP ${r.status}`);
+}
+
 // Invio dalla casella del negozio: SMTP, copia in Inviata, riga "out" in mail_messaggi
 async function invia(db: SupabaseClient, casella: Row, m: Invio, firma: Firma, allegati: Allegato[] = []) {
   const pass = Deno.env.get(`MAIL_PASSWORD_${casella.id.toUpperCase()}`);
@@ -184,23 +213,28 @@ async function invia(db: SupabaseClient, casella: Row, m: Invio, firma: Firma, a
     auth: { user: casella.utente || casella.indirizzo, pass },   // utente: login diverso dall'indirizzo (info@tcfactory.it → riccardo@tcfactory.it)
   });
   passo('preparazione');
-  // Aruba a volte rifiuta per un po' l'indirizzo del server (IP AWS condiviso): "550 5.1.0 ... temporaneamente
-  // rifiutata". Il rifiuto arriva alla connessione, prima che la mail parta: si riprova senza rischio di doppioni.
-  const attese = [3000, 8000, 15000];
-  let tentativo = 0;
-  for (; ; tentativo++) {
-    try {
-      await smtp.sendMail({ envelope: { from: casella.indirizzo, to: m.a }, raw });
-      break;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (tentativo >= attese.length || !/temporaneamente rifiutata|temporarily rejected/i.test(msg)) throw e;
-      console.warn(`SMTP rifiutato (tentativo ${tentativo + 1}), riprovo tra ${attese[tentativo] / 1000}s: ${msg}`);
-      await new Promise(r => setTimeout(r, attese[tentativo]));
+  // Prima strada: il relay su Railway (indirizzo d'uscita stabile, non AWS). Riserva: invio diretto con riprove.
+  const relay = await viaRelay(casella, pass, m.a, raw);
+  if (relay === 'inviata') ms.via_relay = 1;
+  else {
+    if (relay) ms.relay_fallito = 1;
+    // Aruba a volte rifiuta per un po' l'indirizzo del server (IP AWS condiviso): "550 5.1.0 ... temporaneamente
+    // rifiutata". Il rifiuto arriva prima del testo della mail: si riprova senza rischio di doppioni.
+    const attese = [3000, 8000, 15000];
+    for (let tentativo = 0; ; tentativo++) {
+      try {
+        await smtp.sendMail({ envelope: { from: casella.indirizzo, to: m.a }, raw });
+        if (tentativo) ms.riprove_smtp = tentativo;   // quante volte Aruba ha rifiutato prima di accettare
+        break;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (tentativo >= attese.length || !/temporaneamente rifiutata|temporarily rejected/i.test(msg)) throw e;
+        console.warn(`SMTP rifiutato (tentativo ${tentativo + 1}), riprovo tra ${attese[tentativo] / 1000}s: ${msg}`);
+        await new Promise(r => setTimeout(r, attese[tentativo]));
+      }
     }
   }
   passo('smtp');
-  if (tentativo) ms.riprove_smtp = tentativo;   // quante volte Aruba ha rifiutato prima di accettare
 
   const { data: riga } = await db.from('mail_messaggi').insert({
     casella_id: casella.id, direzione: 'out', message_id: messageId, in_reply_to: m.inReplyTo || null,
