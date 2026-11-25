@@ -170,15 +170,19 @@ def cartella_ordini_siti(reg):
     if not radice:
         return None
     radice = Path(radice).expanduser()
-    if not radice.is_dir():
-        reg.scrivi(f'ATTENZIONE: "{radice}" non raggiungibile')
+    try:
+        if not radice.is_dir():
+            reg.scrivi(f'ATTENZIONE: "{radice}" non raggiungibile')
+            return None
+        for p in radice.iterdir():
+            if p.is_dir() and re.sub(r'^\d{1,3}\s*-\s*', '', p.name).strip().lower() == ORDINI_SITI.lower():
+                return p
+        p = radice / f'01 - {ORDINI_SITI}'
+        p.mkdir()
+        return p
+    except OSError as e:   # es. macOS nega il NAS al servizio delle 5: i fogli restano nella cartella del giorno
+        reg.scrivi(f'ATTENZIONE: "{radice}" non accessibile ({type(e).__name__}: {e.strerror or e})')
         return None
-    for p in radice.iterdir():
-        if p.is_dir() and re.sub(r'^\d{1,3}\s*-\s*', '', p.name).strip().lower() == ORDINI_SITI.lower():
-            return p
-    p = radice / f'01 - {ORDINI_SITI}'
-    p.mkdir()
-    return p
 
 
 def scarica_libreria(base, reg):
@@ -866,9 +870,12 @@ def file_fun(l):
     if not l['title'].startswith(PREFISSO_FUN):
         return None
     cartella = Path(os.environ.get('CS_STAMPA_FUN', CARTELLA_STAMPA_FUN)).expanduser() / l['title'][len(PREFISSO_FUN):].strip()
-    if not cartella.is_dir():
+    try:
+        if not cartella.is_dir():
+            return None
+        file = sorted(cartella.glob('*.png'))
+    except OSError:   # NAS non accessibile: la riga resta tra quelle senza file
         return None
-    file = sorted(cartella.glob('*.png'))
     if len(file) == 1:
         return file[0]
     parti = [x.strip().lower() for x in (l.get('variantTitle') or '').split('/')]
