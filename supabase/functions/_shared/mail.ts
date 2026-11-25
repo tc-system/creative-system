@@ -152,33 +152,39 @@ async function componi(db: SupabaseClient, casella: Row, testoDato: string, firm
   return { testo, html, immagine: allegato };
 }
 
-// Invio tramite il relay SMTP su Railway (automazioni/smtp-relay). Ritorna 'inviata', oppure il motivo per cui
-// si può ripiegare sull'invio diretto (relay non configurato o irraggiungibile, rifiuto prima del testo).
-// Se il relay ha già passato il testo ad Aruba e poi fallisce, l'errore sale: riprovare potrebbe fare un doppione.
-async function viaRelay(casella: Row, pass: string, a: string, raw: Uint8Array): Promise<'inviata' | string | null> {
-  const url = Deno.env.get('SMTP_RELAY_URL'), segreto = Deno.env.get('SMTP_RELAY_SECRET');
-  if (!url || !segreto) return null;
+// Invio dal Mac mini in sede (automazioni/mail-relay, sql/mail-relay.sql): la mail va nella coda, l'agente la
+// consegna ad Aruba dalla connessione dell'ufficio. Ritorna 'inviata', oppure il motivo per cui si può ripiegare
+// sull'invio diretto (agente spento, mail non presa in tempo, rifiuto prima del testo). Se il testo era già
+// partito e poi qualcosa è andato storto, l'errore sale: riprovare potrebbe fare un doppione.
+async function viaMacMini(db: SupabaseClient, casella: Row, pass: string, a: string, raw: Uint8Array): Promise<'inviata' | string | null> {
+  const { data: agente } = await db.from('mail_relay_agenti').select('nome')
+    .gt('visto_at', new Date(Date.now() - 15000).toISOString()).limit(1).maybeSingle();
+  if (!agente) return null;
   let bin = '';
   for (let i = 0; i < raw.length; i += 0x8000) bin += String.fromCharCode(...raw.subarray(i, i + 0x8000));
-  let r: Response;
-  try {
-    r = await fetch(`${url.replace(/\/$/, '')}/invia`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${segreto}` },
-      body: JSON.stringify({ host: casella.smtp_host, port: 465, user: casella.utente || casella.indirizzo, pass, from: casella.indirizzo, to: a, raw: btoa(bin) }),
-      signal: AbortSignal.timeout(45000),
-    });
-  } catch (e) {
-    console.warn('Relay SMTP irraggiungibile, invio diretto:', e);
-    return 'irraggiungibile';
+  const { data: riga, error } = await db.from('mail_relay_coda').insert({
+    host: casella.smtp_host, porta: 465, utente: casella.utente || casella.indirizzo, pass,
+    da: casella.indirizzo, a, raw: btoa(bin),
+  }).select('id').single();
+  if (error || !riga) { console.warn('Coda Mac mini non disponibile, invio diretto:', error); return 'coda'; }
+
+  const inizio = Date.now();
+  while (Date.now() - inizio < 90000) {
+    await new Promise(r => setTimeout(r, 400));
+    const { data: r } = await db.from('mail_relay_coda').select('stato, errore, prima_del_testo').eq('id', riga.id).maybeSingle();
+    if (r?.stato === 'inviata') return 'inviata';
+    if (r?.stato === 'errore') {
+      if (r.prima_del_testo) { console.warn('Mac mini rifiutato prima del testo, invio diretto:', r.errore); return 'rifiutata'; }
+      throw new Error(r.errore || 'Invio dal Mac mini non riuscito');
+    }
+    // Non presa entro 6 secondi: si annulla (solo se è ancora in attesa) e si invia direttamente
+    if (r?.stato === 'attesa' && Date.now() - inizio > 6000) {
+      const { data: annullata } = await db.from('mail_relay_coda').update({ stato: 'annullata', pass: null, raw: null, finita_at: new Date().toISOString() })
+        .eq('id', riga.id).eq('stato', 'attesa').select('id');
+      if (annullata?.length) { console.warn('Mac mini non ha preso la mail, invio diretto'); return 'non presa'; }
+    }
   }
-  if (r.ok) return 'inviata';
-  const j = await r.json().catch(() => ({}));
-  if (r.status !== 502 || j.prima_del_testo) {
-    console.warn(`Relay SMTP ${r.status}, invio diretto:`, j.error);
-    return 'rifiutata';
-  }
-  throw new Error(j.error || `Relay SMTP ${r.status}`);
+  throw new Error('Il Mac mini non ha confermato l\'invio: controllare in Inviata prima di riprovare');
 }
 
 // Invio dalla casella del negozio: SMTP, copia in Inviata, riga "out" in mail_messaggi
@@ -213,11 +219,11 @@ async function invia(db: SupabaseClient, casella: Row, m: Invio, firma: Firma, a
     auth: { user: casella.utente || casella.indirizzo, pass },   // utente: login diverso dall'indirizzo (info@tcfactory.it → riccardo@tcfactory.it)
   });
   passo('preparazione');
-  // Prima strada: il relay su Railway (indirizzo d'uscita stabile, non AWS). Riserva: invio diretto con riprove.
-  const relay = await viaRelay(casella, pass, m.a, raw);
-  if (relay === 'inviata') ms.via_relay = 1;
+  // Prima strada: il Mac mini in sede (connessione dell'ufficio, Aruba la accetta). Riserva: invio diretto con riprove.
+  const relay = await viaMacMini(db, casella, pass, m.a, raw);
+  if (relay === 'inviata') ms.via_mac_mini = 1;
   else {
-    if (relay) ms.relay_fallito = 1;
+    if (relay) ms.mac_mini_ripiego = 1;
     // Aruba a volte rifiuta per un po' l'indirizzo del server (IP AWS condiviso): "550 5.1.0 ... temporaneamente
     // rifiutata". Il rifiuto arriva prima del testo della mail: si riprova senza rischio di doppioni.
     const attese = [3000, 8000, 15000];
