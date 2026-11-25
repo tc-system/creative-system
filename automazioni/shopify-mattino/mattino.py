@@ -55,6 +55,10 @@ NEGOZI_DTF = {'boxfactorylab': 'Box Factory Lab'}
 # Cartella della libreria DTF dentro "Creative System": la pulizia della domenica non la tocca mai
 CARTELLA_PROTETTA = 'Box Factory Lab DTF'
 ATTR_FILE_STAMPA = '_customily-production-url'
+# Calzini Bienjugado Fun senza "Stampa Nome": Customily non fa il file, si usa quello generato da noi
+# (<cartella>/<grafica>/<colore>.png, 23x43). Solo sul Mac in sede, dove il NAS è collegato
+CARTELLA_STAMPA_FUN = '~/NAS/DATI/Bienjugado/abbigliamento sito/calzini/Fun/customily/stampa'   # CS_STAMPA_FUN per cambiarla
+PREFISSO_FUN = 'Calzini Padel Fun - '
 PAGINA_STAMPA = (23 * cm, 43 * cm)
 MAIL_VECCHIA_DOPO_MINUTI = 30
 # Solo gli ordini pagati hanno file di stampa e tag. Gli altri finiscono lo stesso nel PDF dei DDT,
@@ -794,9 +798,12 @@ def crea_pdf_stampa(destinazione, voci, problemi, profilo=None):
         for i, (ordine, titolo, url, pezzi, *resto) in enumerate(voci):
             ritocco = resto[0] if resto else None
             try:
-                r = requests.get(url, timeout=120)
-                r.raise_for_status()
-                dati = r.content
+                if isinstance(url, Path):   # file nostro sul NAS (calzini Fun senza nome)
+                    dati = url.read_bytes()
+                else:
+                    r = requests.get(url, timeout=120)
+                    r.raise_for_status()
+                    dati = r.content
                 if ritocco:   # scritta "BELLO <testo> MA LA FIGA!?" sopra lo sfondo di Customily
                     dati, _, avvisi = bello.componi(dati, ritocco[1], ritocco[0])
                     problemi.extend(f'{ordine}, {titolo}: {a}' for a in avvisi)
@@ -851,6 +858,21 @@ def capo_dtf(l):
 
 def url_file_stampa(l):
     return next((a['value'] for a in l['customAttributes'] if a['key'] == ATTR_FILE_STAMPA), None)
+
+
+def file_fun(l):
+    """File di stampa nostro per un calzino Fun senza nome: cartella = grafica, file = colore della variante
+    (Rajas ha un solo colore, "Unico.png"). None se non è un Fun o il file non c'è."""
+    if not l['title'].startswith(PREFISSO_FUN):
+        return None
+    cartella = Path(os.environ.get('CS_STAMPA_FUN', CARTELLA_STAMPA_FUN)).expanduser() / l['title'][len(PREFISSO_FUN):].strip()
+    if not cartella.is_dir():
+        return None
+    file = sorted(cartella.glob('*.png'))
+    if len(file) == 1:
+        return file[0]
+    parti = [x.strip().lower() for x in (l.get('variantTitle') or '').split('/')]
+    return next((f for f in file if f.stem.lower() in parti), None)
 
 
 def file_pronti(o, ora, errori, rimandati, salta_capi_dtf=False):
@@ -1076,6 +1098,8 @@ def giro(args, applica, reg):
                     finale = bello.finale_da_titolo(l['title']) if n['id'] == 'ciucciamilcalzino' else None
                     ritocco = (finale, bello.testo_cliente(l['customAttributes'])) if finale else None
                     voci_stampa.append((n['id'], o['name'], l['title'], url, l['unfulfilledQuantity'], ritocco))
+                elif n['id'] == 'bienjugado' and file_fun(l):
+                    voci_stampa.append((n['id'], o['name'], l['title'], file_fun(l), l['unfulfilledQuantity'], None))
                 elif l['title'].startswith(SENZA_FILE_SOLO.get(n['id'], '')):
                     senza_file[n['id']].append(f"{o['name']}: {l['title']}")
 
