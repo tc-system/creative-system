@@ -844,7 +844,8 @@ function previewOrderModule(orderId) {
         ${(() => { const lp = modLavParti(order); return lp.length ? `<div class="om-lav"><div class="om-lav-label">Lavorazioni</div>${lp.map(t => `<div class="om-lav-item">${escapeHtml(t)}</div>`).join('')}</div>` : ''; })()}
         ${(() => { const q = omQr(schedaOrdineUrl(order.id)); return q ? `<a class="om-qr" href="${schedaOrdineUrl(order.id)}" target="_blank" rel="noopener" title="QR dell'ordine: scansionato apre fasi, modulo e bozze">${q.svg()}<span>${escapeHtml(order.id)}</span></a>` : ''; })()}
         <div class="om-actions">
-          <button class="btn btn-secondary btn-sm" onclick="downloadOrderModule('${order.id}')">⬇ Scarica PDF</button>
+          <button class="btn btn-secondary btn-sm" onclick="printOrderModule('${order.id}')">${Icons.printer(14)} Stampa</button>
+          <button class="btn btn-secondary btn-sm" onclick="downloadOrderModule('${order.id}')">${Icons.download(14)} Scarica</button>
           <button class="btn-icon" onclick="closeModal('file-preview-modal')" aria-label="Chiudi">${Icons.x()}</button>
         </div>
       </div>
@@ -945,12 +946,30 @@ function modLavParti(order) {
   return [parte('interne', 'INTERNA', isLavInterna(o)), parte('esterne', 'ESTERNA', !!o.lavorazioneEsterna)].filter(Boolean);
 }
 
-function downloadOrderModule(orderId) {
+function downloadOrderModule(orderId, stampa = false) {
   const D = orderModuleData(orderId);
   if (!D) return;
   D.lavParti = modLavParti(D.order);
   // Usa jsPDF se disponibile, altrimenti la stampa del browser
-  if (window.jspdf?.jsPDF) _generatePDF(D); else _generatePrintPreview(D);
+  if (window.jspdf?.jsPDF) _generatePDF(D, stampa); else _generatePrintPreview(D);
+}
+
+// Stampa: stesso PDF, mandato alla finestra di stampa senza salvarlo
+function printOrderModule(orderId) { downloadOrderModule(orderId, true); }
+
+function omStampaPdf(doc) {
+  const url = URL.createObjectURL(doc.output('blob'));
+  document.getElementById('om-stampa-frame')?.remove();
+  const frame = document.createElement('iframe');
+  frame.id = 'om-stampa-frame';
+  frame.className = 'fm-stampa-frame';
+  frame.title = 'Modulo da stampare';
+  frame.src = url;
+  frame.onload = () => {
+    try { frame.contentWindow.focus(); frame.contentWindow.print(); }
+    catch { window.open(url, '_blank', 'noopener'); }   // browser che non stampano dal riquadro: si apre in una scheda
+  };
+  document.body.appendChild(frame);
 }
 
 const omRgb = (hex) => { const h = String(hex || '').replace('#', ''); return /^[0-9a-f]{6}$/i.test(h) ? [0, 2, 4].map(i => parseInt(h.substr(i, 2), 16)) : [34, 38, 44]; };
@@ -967,7 +986,7 @@ function omQr(text) {
   } catch { return null; }
 }
 
-function _generatePDF(D) {
+function _generatePDF(D, stampa = false) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pw = doc.internal.pageSize.width, ph = doc.internal.pageSize.height;
@@ -1119,6 +1138,7 @@ function _generatePDF(D) {
   }
 
   const nomeFile = `${D.cliente || 'ordine'}${D.desc ? '-' + D.desc : ''}`.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '');
+  if (stampa) return omStampaPdf(doc);
   doc.save(`ordine-${nomeFile}-${D.data || 'senza-data'}.pdf`);
 }
 
@@ -1158,7 +1178,7 @@ ${D.notes ? `<div class="nl">Note</div><div class="nt">${escapeHtml(D.notes)}</d
 <script>window.onload=()=>window.print()<\/script></body></html>`;
   const win = window.open('', '_blank');
   if (win) { win.document.write(html); win.document.close(); }
-  else showToast('Abilita i popup per scaricare il modulo', 'error');
+  else showToast('Abilita i popup per stampare il modulo', 'error');
 }
 
 // ─────────────────────────────────────────────
@@ -1591,7 +1611,8 @@ function modPanelHtml(g) {
           ${g ? `<button type="button" class="btn-icon" style="color:var(--priority-urgent);" title="Elimina ${prev ? 'preventivo' : 'integrazione'}" onclick="event.stopPropagation();removeFormModule(${g})">${Icons.trash(13)}</button>` : `
           <button type="button" class="btn btn-secondary btn-sm btn-solo" title="Aggiungi modulo d'ordine (integrazione)" aria-label="Aggiungi modulo d'ordine" onclick="event.stopPropagation();addFormModule()">${Icons.plus(13)}</button>
           <button type="button" class="btn btn-secondary btn-sm" title="Aggiungi un preventivo (da approvare, non si ordina)" onclick="event.stopPropagation();addFormModule(true)">${Icons.plus(13)} Preventivo</button>
-          <button type="button" class="btn btn-secondary btn-sm" onclick="event.stopPropagation();downloadOrderModule(null)">⬇ Scarica</button>`}
+          <button type="button" class="btn btn-secondary btn-sm" onclick="event.stopPropagation();printOrderModule(null)">${Icons.printer(13)} Stampa</button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="event.stopPropagation();downloadOrderModule(null)">${Icons.download(13)} Scarica</button>`}
           ${chevron}
         </div>
       </div>
