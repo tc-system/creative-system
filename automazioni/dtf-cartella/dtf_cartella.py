@@ -913,8 +913,8 @@ def nome_libero(cartella, nome, size):
 
 def conto_terzi(cfg, roll, gap, prova, cartella_nas, stato, forza=False):
     """Alle 5 e poi ogni ora fino alle 14, nei giorni lavorativi: i file nuovi della cartella Drive
-    del cliente vanno in 1. Stampare/<cliente> sul NAS e si contano nel conto terzi di oggi. Su Drive
-    restano dove sono finché in sede non si spostano in <cliente>/stampato (vedi ct_stampato). Nei giorni di stampa del cliente (di solito mar e gio) tutti i file; negli
+    del cliente vanno in 1. Stampare/<cliente> sul NAS e si registrano (senza contarli). Si contano nel conto
+    terzi, e su Drive vanno in STAMPATO, quando in sede si spostano in <cliente>/stampato (vedi ct_stampato). Nei giorni di stampa del cliente (di solito mar e gio) tutti i file; negli
     altri giorni lavorativi solo quelli nelle cartelle URGENZE. Il resto aspetta il giorno di stampa."""
     if not os.path.exists(GOOGLE) or not os.path.isdir(cartella_nas):
         return
@@ -945,10 +945,10 @@ def conto_terzi(cfg, roll, gap, prova, cartella_nas, stato, forza=False):
         if solo_urgenze:
             files = [f for f in files if any(URGENZE.fullmatch(p.strip()) for p in f['percorso'].split('/')[:-1])]
 
-        # Da copiare: i file mai contati (o cambiati dopo il conteggio)
+        # Da copiare: i file mai copiati (o cambiati dopo la copia)
         def contato(f):
             n = noti.get(f['id'])
-            return bool(n and n.get('contato') and int(n.get('size') or -1) == int(f.get('size') or 0)
+            return bool(n and (n.get('copiato') or n.get('contato')) and int(n.get('size') or -1) == int(f.get('size') or 0)
                         and stessa_ora(n.get('modificato'), f['modifiedTime']))
         nuovi = [f for f in files if not contato(f)]
         copiati = []
@@ -973,9 +973,9 @@ def conto_terzi(cfg, roll, gap, prova, cartella_nas, stato, forza=False):
                 r = rpc(cfg, 'tc_dtf_ct_copiati', {'p_chiave': cfg['chiave'], 'p_client': c['id'],
                                                    'p_files': [{k: v for k, v in x.items() if k not in ('_f', '_p')} for x in copiati]})
                 if not r.get('success'):
-                    print(f"  conto terzi {c['nome']}: conteggio non salvato: {r.get('error')}", file=sys.stderr)
-                    continue   # non si sposta niente su Drive: al prossimo giro si riprova
-                print(f"  conto terzi {c['nome']}: {r.get('contati')} file, {r.get('metri')} m nel conto terzi di oggi")
+                    print(f"  conto terzi {c['nome']}: copia non registrata: {r.get('error')}", file=sys.stderr)
+                    continue   # al prossimo giro si riprova
+                print(f"  conto terzi {c['nome']}: {r.get('copiati')} file copiati, {r.get('metri')} m (si contano da stampati)")
                 # Quale file di Drive è ogni copia: quando in sede va in <cliente>/stampato, su Drive va in STAMPATO
                 copie = leggi_copie()
                 for x in copiati:
@@ -1026,9 +1026,10 @@ def drive_in_stampato(tok, info, cache):
         pass
 
 
-def ct_stampato(cartella_nas, ct_clienti, prova, stato):
+def ct_stampato(cfg, cartella_nas, ct_clienti, prova, stato):
     """Ogni giro: in 1. Stampare/1 - <cliente> c'è la sottocartella "stampato"; i file copiati da Drive che
-    in sede si spostano lì vanno anche su Drive nella STAMPATO del loro mese. Ogni venerdì dalle 23:30
+    in sede si spostano lì si contano nel calendario del conto terzi di oggi (tc_dtf_ct_stampati, una volta
+    sola) e vanno anche su Drive nella STAMPATO del loro mese. Ogni venerdì dalle 23:30
     i file di "stampato" si cancellano (solo quelli già spostati anche su Drive)."""
     if not ct_clienti or not os.path.isdir(cartella_nas):
         return []
@@ -1052,13 +1053,21 @@ def ct_stampato(cartella_nas, ct_clienti, prova, stato):
             os.makedirs(st_dir, exist_ok=True)
         nomi = [n for n in sorted(os.listdir(st_dir)) if not salta(n) and os.path.isfile(os.path.join(st_dir, n))]
         in_attesa = set()
-        for n in nomi:
-            k = copia_chiave(c['id'], n)
-            info = copie.get(k)
-            if not info:
-                continue   # copiato prima del 2026-11-26 (già in STAMPATO su Drive) o non da Drive
+        pronti = [(n, copia_chiave(c['id'], n)) for n in nomi if copia_chiave(c['id'], n) in copie]
+        # (gli altri: copiati prima del 2026-11-26, già contati e in STAMPATO su Drive, o non da Drive)
+        if pronti and not prova:
+            r = rpc(cfg, 'tc_dtf_ct_stampati', {'p_chiave': cfg['chiave'], 'p_client': c['id'],
+                                                'p_drive_ids': [copie[k]['id'] for _, k in pronti]})
+            if not r.get('success'):
+                righe.append(f"ERRORE conto terzi {c['nome']}: conteggio degli stampati non salvato: {r.get('error')}")
+                in_attesa |= {n for n, _ in pronti}
+                pronti = []
+            elif r.get('contati'):
+                righe.append(f"conto terzi {c['nome']}: {r.get('contati')} file stampati, {r.get('metri')} m nel conto terzi di oggi")
+        for n, k in pronti:
+            info = copie[k]
             if prova:
-                righe.append(f"conto terzi {c['nome']}: sposterei su Drive {info['percorso']} in STAMPATO")
+                righe.append(f"conto terzi {c['nome']}: conterei e sposterei su Drive {info['percorso']} in STAMPATO")
                 continue
             try:
                 tok = tok or token_google()
@@ -1472,7 +1481,7 @@ def main():
 
     # Conto terzi: <cliente>/stampato → STAMPATO su Drive; il venerdì dalle 23:30 si svuota
     try:
-        ct_righe = ct_stampato(a.cartella, dati.get('ct_clienti') or [], a.prova, stato)
+        ct_righe = ct_stampato(cfg, a.cartella, dati.get('ct_clienti') or [], a.prova, stato)
     except Exception as e:
         ct_righe = [f'ERRORE conto terzi stampato: {e}']
 
