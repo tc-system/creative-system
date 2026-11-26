@@ -86,10 +86,11 @@ Iter (deciso 2026-11-19):
 2. Nei suoi **giorni di stampa** (scheda cliente, di solito mar e gio; solo giorni lavorativi)
    **alle 5:00** lo script copia i file nuovi in `DTF/1. Stampa/1. Stampare/1 - <cliente>` (es. `1 - K1`).
    La cartella sta in cima alla coda DTF interno; niente task "senza ordine".
-3. Subito dopo li conta nel calendario **DTF Conto terzi** di oggi (`tc_dtf_ct_copiati`,
-   una volta sola per file). **Su Drive restano dove sono** (dal 2026-11-26).
+3. Subito dopo li registra (`tc_dtf_ct_copiati`, `copiato_at`) **senza contarli**: si contano nel calendario
+   **DTF Conto terzi** solo da stampati (`sql/dtf-ct-stampato.sql`, dal 2026-11-26). **Su Drive restano dove sono**.
    - Dentro `1 - K1` c'è la sottocartella `stampato` (la crea lo script). Quando in sede si sposta un file lì,
-     al giro dopo (ogni minuto) lo script sposta anche il file di Drive nella **STAMPATO** del suo mese
+     al giro dopo (ogni minuto) lo script lo conta nel calendario di quel giorno (`tc_dtf_ct_stampati`, una volta sola)
+     e sposta anche il file di Drive nella **STAMPATO** del suo mese
      (legame copia ↔ Drive in `ct_copie.json` sul Mac mini; i file copiati prima del 26/11 erano già in STAMPATO).
    - **Ogni venerdì dalle 23:30** si cancellano i file in `1 - K1/stampato` (non quelli non ancora spostati su
      Drive per un errore: restano finché lo spostamento riesce). La cartella `stampato` non conta nei metri.

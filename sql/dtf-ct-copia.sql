@@ -2,7 +2,7 @@
 -- T&C Factory — DTF Conto terzi: copia da Google Drive al NAS nei giorni di stampa
 -- Martedì e giovedì (giorni del cliente, solo lavorativi) alle 5 e poi ogni ora fino alle 14
 -- il Mac mini copia i file nuovi della cartella Drive del cliente in DTF/1. Stampa/1. Stampare/<cliente>,
--- li conta nel calendario del conto terzi (tc_dtf_ct_copiati) e su Drive li sposta in STAMPATO.
+-- li registra (tc_dtf_ct_copiati). Dal 2026-11-26 si contano da stampati: vedi sql/dtf-ct-stampato.sql.
 -- Sul NAS la cartella del cliente è riconosciuta (ct_clienti) e sta in cima alla coda DTF interno.
 -- Richiede sql/dtf-ct-drive.sql e sql/dtf-cartella-server.sql. Si può rieseguire.
 -- ════════════════════════════════════════════════════════
