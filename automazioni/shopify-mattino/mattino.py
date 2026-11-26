@@ -35,6 +35,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
 import bello
+import libreria_calzini
 
 API = '2026-10'
 ROMA = ZoneInfo('Europe/Rome')
@@ -55,6 +56,10 @@ NEGOZI_DTF = {'boxfactorylab': 'Box Factory Lab'}
 # Cartella della libreria DTF dentro "Creative System": la pulizia della domenica non la tocca mai
 CARTELLA_PROTETTA = 'Box Factory Lab DTF'
 ATTR_FILE_STAMPA = '_customily-production-url'
+# Calzini Bienjugado Fun senza "Stampa Nome": Customily non fa il file, si usa quello generato da noi
+# (<cartella>/<grafica>/<colore>.png, 23x43). Solo sul Mac in sede, dove il NAS è collegato
+CARTELLA_STAMPA_FUN = '~/NAS/DATI/Bienjugado/abbigliamento sito/calzini/Fun/customily/stampa'   # CS_STAMPA_FUN per cambiarla
+PREFISSO_FUN = 'Calzini Padel Fun - '
 PAGINA_STAMPA = (23 * cm, 43 * cm)
 MAIL_VECCHIA_DOPO_MINUTI = 30
 # Solo gli ordini pagati hanno file di stampa e tag. Gli altri finiscono lo stesso nel PDF dei DDT,
@@ -77,7 +82,7 @@ ORDINE = '''query($id:ID!){order(id:$id){
   shippingAddress{name company address1 address2 zip city provinceCode country countryCodeV2}
   billingAddress{name company address1 address2 zip city provinceCode country countryCodeV2}
   lineItems(first:100){nodes{title variantTitle quantity unfulfilledQuantity requiresShipping
-    image{url(transform:{maxWidth:160})} customAttributes{key value}}}
+    image{url(transform:{maxWidth:160})} customAttributes{key value} variant{selectedOptions{name value}} product{handle}}}
 }}'''
 # Bienjugado: sul DDT le righe dell'articolo sono ricomposte (modello, uomo/donna, tessuto, colore, taglia, grafica, nome)
 # e servono le opzioni della variante e i tag del prodotto
@@ -85,7 +90,7 @@ NEGOZI_DDT_ARTICOLI = {'bienjugado'}
 # Bienjugado e Box Factory Lab: articoli in ordine di tipo (t-shirt, short, felpe, pantaloni, resto, calzini)
 # e una casella da spuntare accanto alla quantità
 NEGOZI_DDT_ORDINATI = {'bienjugado', 'boxfactorylab'}
-ORDINE_ARTICOLI = ORDINE.replace('customAttributes{key value}}}', 'customAttributes{key value} variant{selectedOptions{name value}} product{tags productType}}}')
+ORDINE_ARTICOLI = ORDINE.replace('product{handle}', 'product{handle tags productType}')
 NEGOZIO = '{shop{name contactEmail primaryDomain{host} billingAddress{address1 address2 zip city provinceCode country countryCodeV2}} currentAppInstallation{accessScopes{handle}}}'
 AGGIUNGI_TAG = 'mutation($id:ID!,$tags:[String!]!){tagsAdd(id:$id,tags:$tags){userErrors{message}}}'
 
@@ -167,15 +172,19 @@ def cartella_ordini_siti(reg):
     if not radice:
         return None
     radice = Path(radice).expanduser()
-    if not radice.is_dir():
-        reg.scrivi(f'ATTENZIONE: "{radice}" non raggiungibile')
+    try:
+        if not radice.is_dir():
+            reg.scrivi(f'ATTENZIONE: "{radice}" non raggiungibile')
+            return None
+        for p in radice.iterdir():
+            if p.is_dir() and re.sub(r'^\d{1,3}\s*-\s*', '', p.name).strip().lower() in NOMI_ORDINI_SITI:
+                return p
+        p = radice / ORDINI_SITI
+        p.mkdir()
+        return p
+    except OSError as e:   # es. macOS nega il NAS al servizio delle 5: i fogli restano nella cartella del giorno
+        reg.scrivi(f'ATTENZIONE: "{radice}" non accessibile ({type(e).__name__}: {e.strerror or e})')
         return None
-    for p in radice.iterdir():
-        if p.is_dir() and re.sub(r'^\d{1,3}\s*-\s*', '', p.name).strip().lower() in NOMI_ORDINI_SITI:
-            return p
-    p = radice / ORDINI_SITI
-    p.mkdir()
-    return p
 
 
 def scarica_libreria(base, reg):
@@ -796,10 +805,11 @@ def scrivi_pdf_stampa(destinazione, pagine, profilo=None):
         incorpora_profilo(Path(destinazione), profilo)
 
 
-def crea_pdf_stampa(cartella, prefisso, voci, problemi, profilo=None):
+def crea_pdf_stampa(cartella, prefisso, voci, problemi, profilo=None, alla_libreria=None):
     """I file di stampa in ordine di arrivo degli ordini, una pagina per ogni pezzo: 5 calzini uguali = 5 pagine.
     Si fanno PDF di al massimo MAX_PAGINE_PDF pagine; un ordine non si divide tra due PDF se ci sta intero.
     Con il profilo (Textile della SC-F500) le grafiche sono convertite e il profilo è incorporato nel PDF.
+    alla_libreria(voce, dati): riceve il file originale di Customily, per la libreria dei calzini.
     Ritorna ([(file, pagine)], ordini non riusciti)."""
     W, H = PAGINA_STAMPA
     falliti = set()
@@ -811,9 +821,17 @@ def crea_pdf_stampa(cartella, prefisso, voci, problemi, profilo=None):
         for i, (ordine, titolo, url, pezzi, *resto) in enumerate(voci):
             ritocco = resto[0] if resto else None
             try:
-                r = requests.get(url, timeout=120)
-                r.raise_for_status()
-                dati = r.content
+                if isinstance(url, Path):   # file nostro sul NAS (calzini Fun senza nome)
+                    dati = url.read_bytes()
+                else:
+                    r = requests.get(url, timeout=120)
+                    r.raise_for_status()
+                    dati = r.content
+                    if alla_libreria and not ritocco:
+                        try:
+                            alla_libreria(i, dati)
+                        except Exception as e:   # la libreria non deve mai fermare la stampa
+                            problemi.append(f'{ordine}, {titolo}: libreria calzini non aggiornata ({type(e).__name__}: {str(e)[:60]})')
                 if ritocco:   # scritta "BELLO <testo> MA LA FIGA!?" sopra lo sfondo di Customily
                     dati, _, avvisi = bello.componi(dati, ritocco[1], ritocco[0])
                     problemi.extend(f'{ordine}, {titolo}: {a}' for a in avvisi)
@@ -884,6 +902,24 @@ def capo_dtf(l):
 
 def url_file_stampa(l):
     return next((a['value'] for a in l['customAttributes'] if a['key'] == ATTR_FILE_STAMPA), None)
+
+
+def file_fun(l):
+    """File di stampa nostro per un calzino Fun senza nome: cartella = grafica, file = colore della variante
+    (Rajas ha un solo colore, "Unico.png"). None se non è un Fun o il file non c'è."""
+    if not l['title'].startswith(PREFISSO_FUN):
+        return None
+    cartella = Path(os.environ.get('CS_STAMPA_FUN', CARTELLA_STAMPA_FUN)).expanduser() / l['title'][len(PREFISSO_FUN):].strip()
+    try:
+        if not cartella.is_dir():
+            return None
+        file = sorted(cartella.glob('*.png'))
+    except OSError:   # NAS non accessibile: la riga resta tra quelle senza file
+        return None
+    if len(file) == 1:
+        return file[0]
+    parti = [x.strip().lower() for x in (l.get('variantTitle') or '').split('/')]
+    return next((f for f in file if f.stem.lower() in parti), None)
 
 
 def file_pronti(o, ora, errori, rimandati, salta_capi_dtf=False):
@@ -1091,6 +1127,7 @@ def giro(args, applica, reg):
 
     # 4. File di stampa: esclusi gli ordini da modificare, per non stampare un file sbagliato
     voci_stampa = []
+    libreria = libreria_calzini.Libreria()
     senza_file = {n['id']: [] for n in negozi}
     esclusi = {n['id']: [] for n in negozi}
     for n, _, _, _, ordini in per_negozio:
@@ -1108,7 +1145,25 @@ def giro(args, applica, reg):
                     # "Personalizzato Bello ... ma la figa/il c***o": Customily dà solo lo sfondo, la scritta si aggiunge qui
                     finale = bello.finale_da_titolo(l['title']) if n['id'] == 'ciucciamilcalzino' else None
                     ritocco = (finale, bello.testo_cliente(l['customAttributes'])) if finale else None
-                    voci_stampa.append((n['id'], o['name'], l['title'], url, l['unfulfilledQuantity'], ritocco))
+                    voci_stampa.append((n['id'], o['name'], l['title'], url, l['unfulfilledQuantity'], ritocco, (l, o['createdAt'])))
+                    continue
+                # Senza il file di Customily: quello messo a mano, quello già prodotto da Customily per lo stesso
+                # calzino e colore (libreria), quello nostro sul NAS (Bienjugado Fun senza nome)
+                file = None
+                if libreria_calzini.e_calzino(n['id'], l) and not libreria_calzini.personalizzata(l):
+                    file = libreria.file(n['id'], l)
+                if file is None and n['id'] == 'bienjugado':
+                    file = file_fun(l)
+                if file:
+                    voci_stampa.append((n['id'], o['name'], l['title'], file, l['unfulfilledQuantity'], None, None))
+                elif libreria_calzini.e_calzino(n['id'], l):
+                    variante = f" ({l['variantTitle']})" if l.get('variantTitle') else ''
+                    dove = libreria.nome_a_mano(n['id'], l)
+                    perche = ('personalizzato, il file va fatto a mano' if libreria_calzini.personalizzata(l)
+                              else f'mettere il file in libreria-calzini/{dove} e stamparlo a mano' if dove
+                              else 'prodotto non più su Shopify, file da fare a mano')
+                    avvisi_stampa[n['id']].append(f"{o['name']}: {l['title']}{variante}, {l['unfulfilledQuantity']} pz: "
+                                                  f"NESSUN FILE DI STAMPA nel PDF ({perche})")
                 elif l['title'].startswith(SENZA_FILE_SOLO.get(n['id'], '')):
                     senza_file[n['id']].append(f"{o['name']}: {l['title']}")
 
@@ -1120,12 +1175,16 @@ def giro(args, applica, reg):
         voci = [v[1:] for v in voci_stampa if v[0] == i]
         if not voci:
             continue
+
+        def alla_libreria(k, dati, voci=voci, i=i):
+            riga, data = voci[k][5]
+            libreria.registra(i, riga, voci[k][0], data, dati)
         try:
             if profilo_stampa is None:
                 profilo_stampa = trova_profilo_stampa(args.cartella / CARTELLA_PROTETTA) or b''
             if not profilo_stampa:
                 avvisi_stampa[i].append(f'PDF SENZA il profilo {NOME_PROFILO} (file {PROFILO_STAMPA} non trovato): i colori non sono quelli di Illustrator')
-            creati, falliti = crea_pdf_stampa(cartella, prefisso, voci, avvisi_stampa[i], profilo_stampa or None)
+            creati, falliti = crea_pdf_stampa(cartella, prefisso, voci, avvisi_stampa[i], profilo_stampa or None, alla_libreria)
             falliti_stampa |= {(i, x) for x in falliti}
             if creati:
                 pdf_stampa[i] = creati
@@ -1134,6 +1193,10 @@ def giro(args, applica, reg):
             errori.append(f"{nomi[i]}: PDF dei file di stampa non riuscito ({type(e).__name__}: {str(e)[:100]})")
             errori_negozio[i] = errori[-1]
             problemi[i].append(errori[-1])
+    try:
+        libreria.salva()
+    except Exception as e:
+        reg.scrivi(f'ATTENZIONE: libreria calzini non salvata ({type(e).__name__}: {str(e)[:100]})')
 
     # 4b. Fogli DTF: grafiche delle t-shirt, nomi e bandiere, in una cartellina dentro quella del giorno.
     # Esclusi gli ordini da modificare, come per i file di stampa
