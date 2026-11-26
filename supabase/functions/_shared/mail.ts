@@ -152,6 +152,41 @@ async function componi(db: SupabaseClient, casella: Row, testoDato: string, firm
   return { testo, html, immagine: allegato };
 }
 
+// Invio dal Mac mini in sede (automazioni/mail-relay, sql/mail-relay.sql): la mail va nella coda, l'agente la
+// consegna ad Aruba dalla connessione dell'ufficio. Ritorna 'inviata', oppure il motivo per cui si può ripiegare
+// sull'invio diretto (agente spento, mail non presa in tempo, rifiuto prima del testo). Se il testo era già
+// partito e poi qualcosa è andato storto, l'errore sale: riprovare potrebbe fare un doppione.
+async function viaMacMini(db: SupabaseClient, casella: Row, pass: string, a: string, raw: Uint8Array): Promise<'inviata' | string | null> {
+  const { data: agente } = await db.from('mail_relay_agenti').select('nome')
+    .gt('visto_at', new Date(Date.now() - 15000).toISOString()).limit(1).maybeSingle();
+  if (!agente) return null;
+  let bin = '';
+  for (let i = 0; i < raw.length; i += 0x8000) bin += String.fromCharCode(...raw.subarray(i, i + 0x8000));
+  const { data: riga, error } = await db.from('mail_relay_coda').insert({
+    host: casella.smtp_host, porta: 465, utente: casella.utente || casella.indirizzo, pass,
+    da: casella.indirizzo, a, raw: btoa(bin),
+  }).select('id').single();
+  if (error || !riga) { console.warn('Coda Mac mini non disponibile, invio diretto:', error); return 'coda'; }
+
+  const inizio = Date.now();
+  while (Date.now() - inizio < 90000) {
+    await new Promise(r => setTimeout(r, 400));
+    const { data: r } = await db.from('mail_relay_coda').select('stato, errore, prima_del_testo').eq('id', riga.id).maybeSingle();
+    if (r?.stato === 'inviata') return 'inviata';
+    if (r?.stato === 'errore') {
+      if (r.prima_del_testo) { console.warn('Mac mini rifiutato prima del testo, invio diretto:', r.errore); return 'rifiutata'; }
+      throw new Error(r.errore || 'Invio dal Mac mini non riuscito');
+    }
+    // Non presa entro 6 secondi: si annulla (solo se è ancora in attesa) e si invia direttamente
+    if (r?.stato === 'attesa' && Date.now() - inizio > 6000) {
+      const { data: annullata } = await db.from('mail_relay_coda').update({ stato: 'annullata', pass: null, raw: null, finita_at: new Date().toISOString() })
+        .eq('id', riga.id).eq('stato', 'attesa').select('id');
+      if (annullata?.length) { console.warn('Mac mini non ha preso la mail, invio diretto'); return 'non presa'; }
+    }
+  }
+  throw new Error('Il Mac mini non ha confermato l\'invio: controllare in Inviata prima di riprovare');
+}
+
 // Invio dalla casella del negozio: SMTP, copia in Inviata, riga "out" in mail_messaggi
 async function invia(db: SupabaseClient, casella: Row, m: Invio, firma: Firma, allegati: Allegato[] = []) {
   const pass = Deno.env.get(`MAIL_PASSWORD_${casella.id.toUpperCase()}`);
@@ -184,7 +219,27 @@ async function invia(db: SupabaseClient, casella: Row, m: Invio, firma: Firma, a
     auth: { user: casella.utente || casella.indirizzo, pass },   // utente: login diverso dall'indirizzo (info@tcfactory.it → riccardo@tcfactory.it)
   });
   passo('preparazione');
-  await smtp.sendMail({ envelope: { from: casella.indirizzo, to: m.a }, raw });
+  // Prima strada: il Mac mini in sede (connessione dell'ufficio, Aruba la accetta). Riserva: invio diretto con riprove.
+  const relay = await viaMacMini(db, casella, pass, m.a, raw);
+  if (relay === 'inviata') ms.via_mac_mini = 1;
+  else {
+    if (relay) ms.mac_mini_ripiego = 1;
+    // Aruba a volte rifiuta per un po' l'indirizzo del server (IP AWS condiviso): "550 5.1.0 ... temporaneamente
+    // rifiutata". Il rifiuto arriva prima del testo della mail: si riprova senza rischio di doppioni.
+    const attese = [3000, 8000, 15000];
+    for (let tentativo = 0; ; tentativo++) {
+      try {
+        await smtp.sendMail({ envelope: { from: casella.indirizzo, to: m.a }, raw });
+        if (tentativo) ms.riprove_smtp = tentativo;   // quante volte Aruba ha rifiutato prima di accettare
+        break;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (tentativo >= attese.length || !/temporaneamente rifiutata|temporarily rejected/i.test(msg)) throw e;
+        console.warn(`SMTP rifiutato (tentativo ${tentativo + 1}), riprovo tra ${attese[tentativo] / 1000}s: ${msg}`);
+        await new Promise(r => setTimeout(r, attese[tentativo]));
+      }
+    }
+  }
   passo('smtp');
 
   const { data: riga } = await db.from('mail_messaggi').insert({

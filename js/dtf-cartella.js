@@ -4,9 +4,8 @@
  *
  * Di regola la legge il Mac mini (automazioni/dtf-cartella, ogni minuto), per tutti i PC:
  * il gestionale pubblica la lista Da stampare in ordine (app_settings 'dtf_lista'),
- * il Mac mini abbina le cartelle, scrive file e metri sugli ordini, numera le cartelle
- * ("01 - cf pavia") ai DTF nuovi o col bottone "Numera ora" ('dtf_numera_richiesta')
- * e lascia il suo esito in 'dtf_cartella_stato'.
+ * il Mac mini abbina le cartelle, scrive file e metri sugli ordini (non le numera né le
+ * riordina più, dal 2026-11-26) e lascia il suo esito in 'dtf_cartella_stato'.
  *
  * Finché il Mac mini non è attivo, la cartella si può collegare da Chrome (sola lettura):
  * il browser la ricorda e la rilegge all'avvio e ogni 5 minuti, con le stesse regole.
@@ -18,7 +17,7 @@ const DTF_CARTELLA_IDB = 'tcf-dtf';
 const DTF_CARTELLA_EVERY = 5 * 60 * 1000;
 const DTF_CARTELLA_EXT = /\.(tiff?|pdf|png|jpe?g)$/i;
 const DTF_CARTELLA_SKIP = /stampato|^\s*pdf originali\s*$/i;   // cartelle già stampate e PDF già trasformati in TIF
-const DTF_CARTELLA_NUM = /^\d{1,3}\s*-\s*/;      // numero davanti messo da "Numera le cartelle"
+const DTF_CARTELLA_NUM = /^\d{1,3}\s*-\s*/;      // numero davanti (messo a mano o dalla vecchia numerazione)
 
 const DtfCartella = {
   handle: null,
@@ -236,32 +235,6 @@ const DtfCartella = {
   // dati vecchi non può più falsarla. Qui non si scrive più niente.
   pubblicaLista() {},
 
-  // Cartelle col nome diverso da quello giusto: senza numero, numero vecchio (priorità cambiata)
-  // o rinominate a mano. Stesse regole del Mac mini (numera in dtf_cartella.py).
-  attesa() {
-    // Col Mac mini attivo vale il suo conteggio (fatto sulla lista del database, ogni minuto)
-    const sv = this.server();
-    if (sv && typeof sv.attesa === 'number') return sv.attesa;
-    const dirs = (this.info()?.cartelle || []).filter(c => c.dir);
-    if (!dirs.length) return 0;
-    const pos = new Map(this._lista().map((x, i) => [x.id, i]));
-    // come il Mac mini: la cartella conto terzi senza posizione va per prima (-1)
-    const p = (c) => c.ordine ? pos.get(c.ordine) : c.ct ? (pos.get(`ct:${c.ct}`) ?? -1) : pos.get(`cartella:${c.nome}`);
-    const numerate = dirs.filter(c => p(c) != null).sort((a, b) => p(a) - p(b) || a.nome.toLowerCase().localeCompare(b.nome.toLowerCase()));
-    const cifre = Math.max(2, String(numerate.length).length);
-    const giusto = new Map(numerate.map((c, i) => [c, `${String(i + 1).padStart(cifre, '0')} - ${c.nome}`]));
-    return dirs.filter(c => (giusto.get(c) || c.nome) !== c.dir).length;
-  },
-
-  // "Numera le cartelle": richiesta al Mac mini, da qualsiasi PC
-  async numeraOra() {
-    if (!this.attesa()) return;
-    try {
-      await TCFactory.setSetting('dtf_numera_richiesta', { at: new Date().toISOString() });
-      showToast(this.server() ? 'Il Mac mini numera le cartelle entro un minuto' : 'Richiesta salvata: la numerazione parte quando il Mac mini è attivo', this.server() ? 'success' : 'error');
-    } catch (e) { console.error('[dtf numera]', e); showToast('Richiesta non salvata: riprova', 'error'); }
-  },
-
   // ── Abbinamento cartella → ordine ──
 
   _tokens(s) {
@@ -287,14 +260,11 @@ const DtfCartella = {
     return pari ? 'ambiguo' : best;
   },
 
-  // ── Riga della cartella in DTF interno: sempre visibile, col bottone Numera ora ──
+  // ── Riga della cartella in DTF interno: sempre visibile ──
   html() {
     const ora = (d) => d ? new Date(d).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) : '';
     const elenco = (arr) => arr.map(escapeHtml).join(', ');
     const btn = (fn, testo, title = '') => `<button type="button" class="btn btn-secondary btn-sm" onclick="DtfCartella.${fn}"${title ? ` title="${title}"` : ''}>${testo}</button>`;
-    const da = this.attesa();
-    const numBtn = `<button type="button" class="btn btn-primary btn-sm dtf-numera-btn" onclick="DtfCartella.numeraOra()" ${da ? '' : 'disabled'}
-      title="${da ? `Mette davanti a ${da === 1 ? 'una cartella' : `${da} cartelle`} il numero della lista qui sotto` : 'Le cartelle sono già numerate nell\'ordine della lista'}">Numera le cartelle${da ? ` · ${da}` : ''}</button>`;
     const bar = (testo, azioni) => `<div class="dtf-cartella-bar">
         <span class="dtf-cartella-text">${Icons.paperclip(13)} ${testo}</span>
         ${azioni.length ? `<span class="dtf-cartella-actions">${azioni.join('')}</span>` : ''}
@@ -305,14 +275,13 @@ const DtfCartella = {
     const sv = this.server();
     if (sv) {
       const testo = `Cartella «1. Stampare» letta dal Mac mini alle ${ora(sv.at)} · ${sv.abbinate || 0} ${sv.abbinate === 1 ? 'ordine abbinato' : 'ordini abbinati'}`
-        + (da ? ` · ${da} ${da === 1 ? 'cartella da numerare' : 'cartelle da numerare'}` : ' · cartelle numerate')
-        + (sv.errori?.length ? ` · <span class="dtf-cartella-err">${sv.errori.length} non rinominate (file aperto?)</span>` : '');
-      return bar(testo, [numBtn]) + extra(sv);
+        + (sv.errori?.length ? ` · <span class="dtf-cartella-err">${sv.errori.length} non spostate (file aperto?)</span>` : '');
+      return bar(testo, []) + extra(sv);
     }
 
     // Qui si arriva solo se il Mac mini non legge la cartella da più di 15 minuti (spento, senza rete o servizio fermo)
     const fermo = 'il Mac mini non la legge da più di 15 minuti: controlla che sia acceso e collegato al NAS';
-    if (this.stato === 'unsupported') return bar(`Cartella «1. Stampare»: ${fermo}.`, [numBtn]);
+    if (this.stato === 'unsupported') return bar(`Cartella «1. Stampare»: ${fermo}.`, []);
     const nome = escapeHtml(this.handle?.name || '1. Stampare');
     const e = this.esito || {};
     let testo, azioni = [];
@@ -333,10 +302,9 @@ const DtfCartella = {
         azioni = [btn('riattiva()', 'Riprova'), btn('collega()', 'Cambia cartella')];
         break;
       default:
-        testo = `Cartella «${nome}» letta da questo PC alle ${ora(e.at)} · ${e.abbinate || 0} ${e.abbinate === 1 ? 'ordine abbinato' : 'ordini abbinati'}${e.aggiunti ? ` · ${e.aggiunti} file nuovi` : ''} · i numeri alle cartelle li mette il Mac mini, che ora non risponde`;
+        testo = `Cartella «${nome}» letta da questo PC alle ${ora(e.at)} · ${e.abbinate || 0} ${e.abbinate === 1 ? 'ordine abbinato' : 'ordini abbinati'}${e.aggiunti ? ` · ${e.aggiunti} file nuovi` : ''} · il Mac mini ora non risponde`;
         azioni = [btn('leggi()', 'Aggiorna')];
     }
-    if (this.stato !== 'scanning') azioni.push(numBtn);
     return bar(testo, azioni) + (this.stato === 'ok' ? extra(e) : '');
   },
 };
