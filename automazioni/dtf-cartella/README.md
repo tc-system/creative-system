@@ -84,15 +84,20 @@ Prova senza scrivere né rinominare: `python3 dtf_cartella.py --prova`
 Iter (deciso 2026-11-19):
 1. Il cliente (es. K1) carica i DTF nella sua cartella Google Drive.
 2. Nei suoi **giorni di stampa** (scheda cliente, di solito mar e gio; solo giorni lavorativi)
-   **alle 5:00** lo script copia i file nuovi in `DTF/1. Stampa/1. Stampare/<cliente>` (es. `K1`).
+   **alle 5:00** lo script copia i file nuovi in `DTF/1. Stampa/1. Stampare/1 - <cliente>` (es. `1 - K1`).
    La cartella sta in cima alla coda DTF interno; niente task "senza ordine".
 3. Subito dopo li conta nel calendario **DTF Conto terzi** di oggi (`tc_dtf_ct_copiati`,
-   una volta sola per file) e su Drive li sposta nella sottocartella **STAMPATO** del loro mese.
+   una volta sola per file). **Su Drive restano dove sono** (dal 2026-11-26).
+   - Dentro `1 - K1` c'è la sottocartella `stampato` (la crea lo script). Quando in sede si sposta un file lì,
+     al giro dopo (ogni minuto) lo script sposta anche il file di Drive nella **STAMPATO** del suo mese
+     (legame copia ↔ Drive in `ct_copie.json` sul Mac mini; i file copiati prima del 26/11 erano già in STAMPATO).
+   - **Ogni venerdì dalle 23:30** si cancellano i file in `1 - K1/stampato` (non quelli non ancora spostati su
+     Drive per un errore: restano finché lo spostamento riesce). La cartella `stampato` non conta nei metri.
 4. Quello che arriva dopo le 5 segue lo stesso giro **ogni ora fino alle 14**; dopo le 14 aspetta il
-   prossimo giorno di stampa. A fine stampa la cartella sul NAS si sposta in Stampato come le altre.
+   prossimo giorno di stampa.
 5. **URGENZE** (dal 2026-11-20): le cartelle `URGENZE` (nel mese, es. `2026/11 - Novembre/URGENZE`, o nella
    radice) fanno lo stesso giro **tutti i giorni lavorativi, lun–ven, dalle 5 alle 14**. Negli altri giorni si
-   copia solo da lì; nei giorni di stampa tutto. Finiscono nella STAMPATO del loro mese.
+   copia solo da lì; nei giorni di stampa tutto. Vanno nella STAMPATO del loro mese come gli altri (da `1 - K1/stampato`).
 
 - Cartelle Drive divise per anni/mesi (`2026/11 - Novembre`): si leggono solo mese corrente e precedente,
   esclusa STAMPATO.
