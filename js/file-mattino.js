@@ -8,8 +8,9 @@
  * Entrambi segnano il file (file_mattino_stampe): il bottone diventa verde con data, ora e operatore,
  * e un nuovo clic chiede conferma.
  * I PDF dei calzini (nella cartella del giorno, DDT escluso) hanno anche "Apri": il PDF si apre nel browser e si
- * stampa da qualsiasi Mac con la finestra di stampa del sistema (driver Epson). Le stampe identiche sono su una
- * pagina sola: le copie di ogni pagina arrivano dallo script del mattino in "<nome>.copie.json" e si leggono qui.
+ * stampa da qualsiasi Mac con la finestra di stampa del sistema (driver Epson). Dal 27/11 i PDF hanno una pagina
+ * per pezzo, in ordine di arrivo, al massimo 20 pagine. Nei giorni prima le stampe identiche erano su una pagina
+ * sola: le copie di ogni pagina arrivano dallo script del mattino in "<nome>.copie.json" e si leggono qui.
  */
 
 const FileMattino = { giorni: null, errore: null, carica: null, stampe: {} };
