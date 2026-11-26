@@ -6,7 +6,7 @@
 -- Si contano solo quelle con la spunta (conteggia): ogni ordine pagato creato DOPO la spunta
 -- scala i pezzi (trigger su shopify_orders, una volta sola per riga); un ordine annullato li ridà.
 -- Quando i pezzi scendono alla soglia, il Mac mini (automazioni/dtf-cartella) copia il file
--- della stampa dal NAS in "1. Stampare/01 - Ordini Siti" e segna ristampa_at; si azzera da
+-- della stampa dal NAS in "1. Stampare/1 - Ordini sito" e segna ristampa_at; si azzera da
 -- solo quando i pezzi tornano sopra la soglia (correzione o ristampa arrivata).
 -- Gestione: Task → coda SCORTE → <negozio> (js/scorte-stampe.js).
 -- Si può rieseguire.

@@ -11,6 +11,8 @@ tutti i PC, anche Windows, senza collegare niente nel browser.
 - **Niente numeri né riordino delle cartelle** (dal 2026-11-26): lo script non rinomina più le cartelle.
   Al primo giro dopo l'aggiornamento toglie una volta sola i numeri messi prima (`01 - cf pavia` → `cf pavia`,
   stato `numeri_tolti`); un numero messo a mano dopo resta e viene ignorato nell'abbinamento.
+  Eccezioni volute (Riccardo, 2026-11-26): solo `1 - Ordini sito` e `1 - K1` (conto terzi) hanno l'1 davanti;
+  lo script le crea così se mancano.
 - Esclude le cartelle "Stampato"; i file sciolti si abbinano ma non si rinominano.
 - **COLLA NERA** (dal 2026-11-20): i file nelle cartelle degli ordini con `colla nera`, `leggings`, `short`,
   `soft shell`, `kway` (anche `k-way`), `windstopper` o `nylon` (dal 2026-11-20) nel nome (o in una sottocartella, es. `ducale/colla nera/`) vanno **sciolti** nella cartella
@@ -50,7 +52,7 @@ tutti i PC, anche Windows, senza collegare niente nel browser.
   col Fatto (`sql/dtf-archivio.sql`). In DTF-FILE tre categorie: 1 Caricare file, 2 Creare TIF, 3 Rinominare file.
 - **Scorte stampe dei negozi** (dal 2026-11-24, `sql/stampe-scorte.sql`, Task → coda SCORTE → Bienjugado): a ogni giro
   controlla che i file delle stampe contate ci siano sul NAS (percorso dentro `DATI`, esito `file_ok`) e copia quelli scesi
-  alla soglia in `Ordini Siti` come `scorta <stampa> - <file>`, una volta sola (`ristampa_at`, azzerato dal gestionale
+  alla soglia in `1 - Ordini sito` come `scorta <stampa> - <file>`, una volta sola (`ristampa_at`, azzerato dal gestionale
   quando i pezzi tornano sopra la soglia). La stessa cartellina riceve dal mattino i fogli DTF di Box Factory Lab.
   Le **bandierine** di Bienjugado (regola `bandiere`) sono su richiesta: per ogni pezzo ordinato che manca
   (pezzi sotto zero) copia il file una volta ("… (2).tif" se ce n'è già uno) e il gestionale le rimette a zero.

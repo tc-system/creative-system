@@ -155,7 +155,8 @@ def carica_nel_gestionale(cartella, reg):
     return falliti
 
 
-ORDINI_SITI = 'Ordini Siti'
+ORDINI_SITI = '1 - Ordini sito'   # con l'1 davanti (come K1), le altre cartelle senza numero
+NOMI_ORDINI_SITI = ('ordini sito', 'ordini siti')
 
 
 def cartella_ordini_siti(reg):
@@ -170,7 +171,7 @@ def cartella_ordini_siti(reg):
         reg.scrivi(f'ATTENZIONE: "{radice}" non raggiungibile')
         return None
     for p in radice.iterdir():
-        if p.is_dir() and re.sub(r'^\d{1,3}\s*-\s*', '', p.name).strip().lower() == ORDINI_SITI.lower():
+        if p.is_dir() and re.sub(r'^\d{1,3}\s*-\s*', '', p.name).strip().lower() in NOMI_ORDINI_SITI:
             return p
     p = radice / ORDINI_SITI
     p.mkdir()
@@ -1151,7 +1152,7 @@ def giro(args, applica, reg):
             voci = [v for v in voci if dtf.tipo_capo(v[1], v[2])]
             if not voci:
                 continue
-            # Mac in sede: direttamente in "1. Stampare/Ordini Siti" sul NAS, non nei file del mattino.
+            # Mac in sede: direttamente in "1. Stampare/1 - Ordini sito" sul NAS, non nei file del mattino.
             # Se il NAS non c'è restano nella cartella del giorno, con l'avviso nel riepilogo
             sotto = cartella_ordini_siti(reg)
             if sotto is None:
