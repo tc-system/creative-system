@@ -900,11 +900,12 @@ def drive_sposta(tok, f, stampato):
 
 
 def cartella_cliente(cartella_nas, nome):
-    """Cartella del cliente in 1. Stampare (anche col numero davanti, es. "01 - K1"); se manca la crea."""
+    """Cartella del cliente in 1. Stampare (anche col numero davanti); se manca la crea come "1 - K1"
+    (le cartelle conto terzi e Ordini sito hanno l'1 davanti, le altre nessun numero)."""
     for n in os.listdir(cartella_nas):
         if os.path.isdir(os.path.join(cartella_nas, n)) and base(n).strip().lower() == nome.strip().lower():
             return os.path.join(cartella_nas, n)
-    p = os.path.join(cartella_nas, nome.strip())
+    p = os.path.join(cartella_nas, f'1 - {nome.strip()}')
     os.makedirs(p, exist_ok=True)
     return p
 
@@ -1206,13 +1207,14 @@ def prepara_ordini(cfg, dati, cartella_nas, prova, stato):
         avvisati.pop(o['id'], None)
 
 
-ORDINI_SITI = 'Ordini Siti'
+ORDINI_SITI = '1 - Ordini sito'   # unica cartella col numero davanti, insieme al conto terzi (K1)
+NOMI_ORDINI_SITI = ('ordini sito', 'ordini siti')
 
 
 def cartella_ordini_siti(cartella, prova):
     """La cartellina dei negozi in 1. Stampare (anche con un numero davanti); se manca la crea."""
     for n in os.listdir(cartella):
-        if os.path.isdir(os.path.join(cartella, n)) and base(n).strip().lower() == ORDINI_SITI.lower():
+        if os.path.isdir(os.path.join(cartella, n)) and base(n).strip().lower() in NOMI_ORDINI_SITI:
             return os.path.join(cartella, n)
     p = os.path.join(cartella, ORDINI_SITI)
     if not prova:
@@ -1253,7 +1255,7 @@ def copia_in(dest_dir, nome, src, nuovo):
 
 def ristampa_stampe(cfg, cartella, prova, stato):
     """Scorte delle stampe dei negozi (Task → coda SCORTE, sql/stampe-scorte.sql): controlla che i file ci siano
-    (NAS, percorso dentro DATI, o la copia sul Mac mini) e copia in "Ordini Siti":
+    (NAS, percorso dentro DATI, o la copia sul Mac mini) e copia in "1 - Ordini sito":
     - le stampe scese alla soglia, una volta sola (il gestionale segna ristampa_at e lo azzera quando i pezzi
       tornano sopra la soglia);
     - le stampe "su richiesta" (bandierine): una copia per ogni pezzo ordinato che mancava (copie), che il
@@ -1417,7 +1419,7 @@ def main():
     pos = {o['id']: i for i, o in enumerate(lista)}
     ordini_lista = [o for o in lista if not o.get('cartella')]
 
-    # Scorte delle stampe dei negozi scese alla soglia: il file va in "Ordini Siti" (letto subito sotto)
+    # Scorte delle stampe dei negozi scese alla soglia: il file va in "1 - Ordini sito" (letto subito sotto)
     try:
         scorte_righe = ristampa_stampe(cfg, a.cartella, a.prova, stato)
     except Exception as e:
