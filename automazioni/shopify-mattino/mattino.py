@@ -160,7 +160,7 @@ ORDINI_SITI = 'Ordini Siti'
 
 def cartella_ordini_siti(reg):
     """Cartellina dei fogli DTF in "1. Stampare" sul NAS (CS_CARTELLA_STAMPARE, solo sul Mac in sede).
-    Va bene anche col numero che le dà la coda DTF ("01 - Ordini Siti"); se manca si crea, già prima.
+    Va bene anche con un numero davanti; se manca si crea.
     None se la variabile non c'è (server) o il NAS non è collegato."""
     radice = os.environ.get('CS_CARTELLA_STAMPARE')
     if not radice:
@@ -172,7 +172,7 @@ def cartella_ordini_siti(reg):
     for p in radice.iterdir():
         if p.is_dir() and re.sub(r'^\d{1,3}\s*-\s*', '', p.name).strip().lower() == ORDINI_SITI.lower():
             return p
-    p = radice / f'01 - {ORDINI_SITI}'
+    p = radice / ORDINI_SITI
     p.mkdir()
     return p
 
@@ -1126,7 +1126,7 @@ def giro(args, applica, reg):
             voci = [v for v in voci if dtf.tipo_capo(v[1], v[2])]
             if not voci:
                 continue
-            # Mac in sede: direttamente in "1. Stampare/01 - Ordini Siti" sul NAS, non nei file del mattino.
+            # Mac in sede: direttamente in "1. Stampare/Ordini Siti" sul NAS, non nei file del mattino.
             # Se il NAS non c'è restano nella cartella del giorno, con l'avviso nel riepilogo
             sotto = cartella_ordini_siti(reg)
             if sotto is None:
