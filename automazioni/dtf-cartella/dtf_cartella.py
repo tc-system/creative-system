@@ -6,8 +6,7 @@ anche Windows, senza collegare niente nel browser:
   • abbina ogni sottocartella a un ordine della lista DTF interno → Da stampare
     (la lista la pubblica il gestionale in app_settings 'dtf_lista', già in ordine);
   • legge misura e pezzi dei file nuovi e scrive file e metri sull'ordine;
-  • quando arriva un DTF nuovo, o col bottone "Numera ora", mette davanti alle cartelle
-    il numero dell'ordine nella lista ("01 - cf pavia").
+  • non numera né riordina le cartelle (tolto il 2026-11-26): i numeri messi prima si tolgono una volta.
 Le cartelle "Stampato" e "PDF originali" sono escluse; i file sciolti si abbinano col loro nome e non si rinominano.
 File sciolti palesemente dello stesso ordine (stesse prime parole) → in una cartella col nome comune.
 PDF senza TIF accanto → task "Creare il file TIF"; dal task "Genera TIFF automatico" (riduzione 0-3 px)
@@ -695,14 +694,30 @@ def aggiorna_items(items, files, roll, gap):
     return items, aggiunti, cambiati
 
 
-# Nome giusto di ogni cartella in d['target']; quelle senza ordine perdono il numero
-def numera(dirs):
-    numerate = sorted([d for d in dirs if d['pos'] is not None], key=lambda d: (d['pos'], d['nome'].lower()))
-    cifre = max(2, len(str(len(numerate))))
-    for d in dirs:
-        d['target'] = d['nome']
-    for i, d in enumerate(numerate):
-        d['target'] = f"{str(i + 1).zfill(cifre)} - {d['nome']}"
+# Numeri automatici davanti alle cartelle ("01 - cf pavia"): tolti una volta sola (2026-11-26),
+# poi le cartelle non si rinominano più (un numero messo a mano resta)
+def togli_numeri(cartella, prova):
+    fatte, errori = [], []
+    for n in sorted(os.listdir(cartella)):
+        p = os.path.join(cartella, n)
+        if salta(n) or not os.path.isdir(p) or not NUMERO.match(n):
+            continue
+        nuovo = base(n).strip()
+        if not nuovo:
+            continue
+        if prova:
+            fatte.append(f'{n} → {nuovo}')
+            continue
+        dest = os.path.join(cartella, nuovo)
+        if os.path.exists(dest):
+            errori.append(f'{n} → {nuovo}: esiste già')
+            continue
+        try:
+            os.rename(p, dest)
+            fatte.append(f'{n} → {nuovo}')
+        except OSError as e:
+            errori.append(f'{n} → {nuovo}: {e.strerror}')
+    return fatte, errori
 
 
 # ── Conto terzi: cartelle Google Drive dei clienti (account robot, sola lettura) ──
@@ -1195,11 +1210,11 @@ ORDINI_SITI = 'Ordini Siti'
 
 
 def cartella_ordini_siti(cartella, prova):
-    """La cartellina prioritaria dei negozi in 1. Stampare (anche numerata, "01 - Ordini Siti"); se manca la crea."""
+    """La cartellina dei negozi in 1. Stampare (anche con un numero davanti); se manca la crea."""
     for n in os.listdir(cartella):
         if os.path.isdir(os.path.join(cartella, n)) and base(n).strip().lower() == ORDINI_SITI.lower():
             return os.path.join(cartella, n)
-    p = os.path.join(cartella, f'01 - {ORDINI_SITI}')
+    p = os.path.join(cartella, ORDINI_SITI)
     if not prova:
         os.makedirs(p, exist_ok=True)
     return p
@@ -1238,7 +1253,7 @@ def copia_in(dest_dir, nome, src, nuovo):
 
 def ristampa_stampe(cfg, cartella, prova, stato):
     """Scorte delle stampe dei negozi (Task → coda SCORTE, sql/stampe-scorte.sql): controlla che i file ci siano
-    (NAS, percorso dentro DATI, o la copia sul Mac mini) e copia in "01 - Ordini Siti":
+    (NAS, percorso dentro DATI, o la copia sul Mac mini) e copia in "Ordini Siti":
     - le stampe scese alla soglia, una volta sola (il gestionale segna ristampa_at e lo azzera quando i pezzi
       tornano sopra la soglia);
     - le stampe "su richiesta" (bandierine): una copia per ogni pezzo ordinato che mancava (copie), che il
@@ -1373,6 +1388,17 @@ def main():
 
     escluse = {c['nome'].strip().lower() for c in dati.get('ct_clienti') or []}
 
+    # Numeri automatici davanti alle cartelle: si tolgono una volta sola
+    rinominate, numeri_errori = [], []
+    if not stato.get('numeri_tolti'):
+        try:
+            rinominate, numeri_errori = togli_numeri(a.cartella, a.prova)
+            # si riprova al giro dopo solo per gli errori passeggeri (file aperto), non per i doppioni
+            if not a.prova and all(e.endswith('esiste già') for e in numeri_errori):
+                stato['numeri_tolti'] = True
+        except Exception as e:
+            numeri_errori.append(f'numeri cartelle: {e}')
+
     # File sciolti dello stesso ordine in una cartella
     sciolti_spostati, sciolti_errori = [], []
     try:
@@ -1391,7 +1417,7 @@ def main():
     pos = {o['id']: i for i, o in enumerate(lista)}
     ordini_lista = [o for o in lista if not o.get('cartella')]
 
-    # Scorte delle stampe dei negozi scese alla soglia: il file va in "01 - Ordini Siti" (letto subito sotto)
+    # Scorte delle stampe dei negozi scese alla soglia: il file va in "Ordini Siti" (letto subito sotto)
     try:
         scorte_righe = ristampa_stampe(cfg, a.cartella, a.prova, stato)
     except Exception as e:
@@ -1477,40 +1503,8 @@ def main():
             print(f"  {nome}: {len(items)} file, {round(sum(x.get('metri') or 0 for x in items), 2)} m"
                   + (f', {n} nuovi' if n else ''))
 
-    # Numeri davanti alle cartelle: DTF nuovi o richiesta dal gestionale
-    percorsi = sorted(chiave(fl['path']) for g in gruppi for fl in g['files'])
-    richiesta = (dati.get('richiesta') or {}).get('at')
-    primo_giro = 'visti' not in stato   # prima lettura: si registra com'è, senza rinominare niente
-    nuovi = set() if primo_giro else set(percorsi) - set(stato.get('visti') or [])
-    chiesta = bool(richiesta) and richiesta != stato.get('richiesta') and not primo_giro
-    dirs = [g for g in gruppi if not g.get('sciolto')]
-    numera(dirs)
-    da_rinominare = [(d, d['target']) for d in dirs if d['target'] != d['dir']]
-    rinominate, errori = [], list(sciolti_errori) + list(colla_errori)
-    if (nuovi or chiesta) and da_rinominare:
-        for d, nuovo in da_rinominare:
-            if a.prova:
-                rinominate.append(f"{d['dir']} → {nuovo}")
-                continue
-            dest = os.path.join(a.cartella, nuovo)
-            if os.path.exists(dest):
-                errori.append(f"{d['dir']} → {nuovo}: esiste già")
-                continue
-            try:
-                os.rename(os.path.join(a.cartella, d['dir']), dest)
-                rinominate.append(f"{d['dir']} → {nuovo}")
-                d['dir'] = nuovo
-            except OSError as e:
-                errori.append(f"{d['dir']} → {nuovo}: {e.strerror}")
-    # I percorsi dei file seguono il nome nuovo della cartella
-    for o in ordini:
-        for x in o['items']:
-            if x.get('cartella'):
-                d = next((d for d in dirs if chiave(x['cartella']).startswith(d['nome'] + '/')), None)
-                if d:
-                    x['cartella'] = d['dir'] + '/' + x['cartella'].split('/', 1)[1]
+    errori = list(numeri_errori) + list(sciolti_errori) + list(colla_errori)
 
-    attesa = sum(1 for d in dirs if d['target'] != d['dir'])
     # Ordini che avevano la cartella (file con 'cartella') e ora non ce l'hanno più: controllare se stampati
     mancanti = [o['id'] for o in ordini_lista if o['id'] not in per_ordine
                 and any(x.get('cartella') for x in (items_db.get(o['id']) or []))]
@@ -1552,7 +1546,7 @@ def main():
     esito = {'at': datetime.now(timezone.utc).isoformat(), 'abbinate': len(per_ordine), 'aggiunti': aggiunti,
              'collaNera': len(colla_spostati), 'raggruppati': len(sciolti_spostati), 'pdf': pdf,
              'nomi': nomi,
-             'senzaOrdine': senza, 'ambigue': ambigue, 'rinominate': len(rinominate), 'attesa': attesa,
+             'senzaOrdine': senza, 'ambigue': ambigue, 'rinominate': len(rinominate),
              'errori': errori, 'cartelle': cartelle, 'mancanti': mancanti}
     for r in sciolti_spostati:
         print('  raggruppa', r)
@@ -1565,7 +1559,7 @@ def main():
     for e in errori:
         print('  ERRORE', e, file=sys.stderr)
     if a.prova:
-        print(json.dumps({**esito, 'ordini_da_salvare': len(ordini), 'nuovi': len(nuovi), 'richiesta': chiesta},
+        print(json.dumps({**esito, 'ordini_da_salvare': len(ordini)},
                          ensure_ascii=False, indent=1))
         return 0
 
@@ -1581,7 +1575,7 @@ def main():
         stato.update({'firma': firma, 'salvato': ora})
     os.makedirs(DIR_DATI, exist_ok=True)
     with open(STATO, 'w') as f:
-        json.dump({**stato, 'visti': percorsi, 'richiesta': richiesta}, f)
+        json.dump({k: v for k, v in stato.items() if k not in ('visti', 'richiesta')}, f)
 
     if rinominate or errori or aggiunti or colla_spostati or sciolti_spostati or tiff_righe or scorte_righe:   # registro del Centro di controllo solo quando cambia qualcosa
         try:

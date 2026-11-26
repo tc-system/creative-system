@@ -8,8 +8,9 @@ tutti i PC, anche Windows, senza collegare niente nel browser.
 - Lo script abbina ogni sottocartella a un ordine per nome (`cf` = crossfit, spazi e numero
   davanti ignorati, descrizione per i nomi doppi), legge misura e pezzi dei file nuovi e
   scrive file e metri sull'ordine (stesse regole di `js/dtf-misure.js`). Non toglie mai file.
-- Quando arriva un DTF nuovo, o col bottone **Numera ora** (`dtf_numera_richiesta`), mette
-  davanti alle cartelle il numero dell'ordine nella lista: `01 - cf pavia`, `02 - …`.
+- **Niente numeri né riordino delle cartelle** (dal 2026-11-26): lo script non rinomina più le cartelle.
+  Al primo giro dopo l'aggiornamento toglie una volta sola i numeri messi prima (`01 - cf pavia` → `cf pavia`,
+  stato `numeri_tolti`); un numero messo a mano dopo resta e viene ignorato nell'abbinamento.
 - Esclude le cartelle "Stampato"; i file sciolti si abbinano ma non si rinominano.
 - **COLLA NERA** (dal 2026-11-20): i file nelle cartelle degli ordini con `colla nera`, `leggings`, `short`,
   `soft shell`, `kway` (anche `k-way`), `windstopper` o `nylon` (dal 2026-11-20) nel nome (o in una sottocartella, es. `ducale/colla nera/`) vanno **sciolti** nella cartella
@@ -22,7 +23,7 @@ tutti i PC, anche Windows, senza collegare niente nel browser.
   gestionale li toglie dal totale se l'ordine è in coda; la riga mostra comunque tutti i metri della cartella.
 - **File sciolti raggruppati** (dal 2026-11-20): i file sciolti in 1. Stampare con le stesse prime parole
   (`House dietro 100 pezzi.pdf`, `House lato cuore 100 pezzi.pdf`) vanno in una cartella col nome comune (`House`);
-  se la cartella c'è già (anche numerata) vanno lì, e lì va anche un file da solo che inizia col suo nome. Parole
+  se la cartella c'è già (anche con un numero davanti) vanno lì, e lì va anche un file da solo che inizia col suo nome. Parole
   generiche (fronte, retro, logo, numeri…) non bastano. Solo file fermi da 2 minuti.
 - **PDF → TIF** (dal 2026-11-20): una cartella (o un file sciolto) con PDF senza il loro TIF accanto finisce
   nell'esito (`pdf`) e il database apre il task URGENTE **Creare il file TIF: <nome>** (coda DTF-FILE,
@@ -49,7 +50,7 @@ tutti i PC, anche Windows, senza collegare niente nel browser.
   col Fatto (`sql/dtf-archivio.sql`). In DTF-FILE tre categorie: 1 Caricare file, 2 Creare TIF, 3 Rinominare file.
 - **Scorte stampe dei negozi** (dal 2026-11-24, `sql/stampe-scorte.sql`, Task → coda SCORTE → Bienjugado): a ogni giro
   controlla che i file delle stampe contate ci siano sul NAS (percorso dentro `DATI`, esito `file_ok`) e copia quelli scesi
-  alla soglia in `01 - Ordini Siti` come `scorta <stampa> - <file>`, una volta sola (`ristampa_at`, azzerato dal gestionale
+  alla soglia in `Ordini Siti` come `scorta <stampa> - <file>`, una volta sola (`ristampa_at`, azzerato dal gestionale
   quando i pezzi tornano sopra la soglia). La stessa cartellina riceve dal mattino i fogli DTF di Box Factory Lab.
   Le **bandierine** di Bienjugado (regola `bandiere`) sono su richiesta: per ogni pezzo ordinato che manca
   (pezzi sotto zero) copia il file una volta ("… (2).tif" se ce n'è già uno) e il gestionale le rimette a zero.
@@ -82,7 +83,7 @@ Iter (deciso 2026-11-19):
 1. Il cliente (es. K1) carica i DTF nella sua cartella Google Drive.
 2. Nei suoi **giorni di stampa** (scheda cliente, di solito mar e gio; solo giorni lavorativi)
    **alle 5:00** lo script copia i file nuovi in `DTF/1. Stampa/1. Stampare/<cliente>` (es. `K1`).
-   La cartella sta in cima alla coda DTF interno e prende il numero 01; niente task "senza ordine".
+   La cartella sta in cima alla coda DTF interno; niente task "senza ordine".
 3. Subito dopo li conta nel calendario **DTF Conto terzi** di oggi (`tc_dtf_ct_copiati`,
    una volta sola per file) e su Drive li sposta nella sottocartella **STAMPATO** del loro mese.
 4. Quello che arriva dopo le 5 segue lo stesso giro **ogni ora fino alle 14**; dopo le 14 aspetta il

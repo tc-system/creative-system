@@ -4,7 +4,7 @@
  *  Elenco delle stampe per famiglia di prodotti (es. "Short Uomo") con i colori della stampa.
  *  La spunta sulla famiglia dice di contarla: da lì ogni ordine pagato scala i pezzi da solo
  *  (trigger su shopify_orders, sql/stampe-scorte.sql). Qui si correggono pezzi, soglia, pezzi per file
- *  e il file sul NAS: scesi alla soglia, il Mac mini copia il file in "1. Stampare/01 - Ordini Siti".
+ *  e il file sul NAS: scesi alla soglia, il Mac mini copia il file in "1. Stampare/Ordini Siti".
  */
 
 const ScorteStampe = {
@@ -158,7 +158,7 @@ function scorteRigaHtml(r, prima, campi) {
   const campo = (k, tipo, extra = '') => `<input class="form-input scorte-in scorte-in-${k}" id="sr-${r.id}-${k}" type="${tipo}" ${extra}
     value="${r[k] == null ? '' : escapeHtml(String(r[k]))}" ${k === 'file' && r.file ? `title="${escapeHtml(r.file)}"` : ''} aria-label="${k}" onchange="scorteSalva('${r.id}', '${k}', this.value)">`;
   let stato = '';
-  if (r.ristampa_at) stato = `<span class="scorte-stato is-giallo" title="Caricato in 1. Stampare/01 - Ordini Siti">In Stampare dal ${new Date(r.ristampa_at).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</span>`;
+  if (r.ristampa_at) stato = `<span class="scorte-stato is-giallo" title="Caricato in 1. Stampare/Ordini Siti">In Stampare dal ${new Date(r.ristampa_at).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</span>`;
   else if (scorteSotto(r)) stato = `<span class="scorte-stato is-rosso">${r.file || scorteArticolo(r) ? 'Sotto soglia' : 'Sotto soglia, manca il file'}</span>`;
   if (r.file && r.file_ok === false) stato += `<span class="scorte-stato is-rosso">File non trovato</span>`;
   return `
