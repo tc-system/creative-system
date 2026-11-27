@@ -10,6 +10,10 @@
 const MESSAGES_POLL_MS = 60000;   // controlla i promemoria in arrivo
 const MESSAGES_LIMIT   = 300;
 
+const MSG_TRILLO_TESTO = 'Trillo!';
+const MSG_TRILLO_PAUSA_MS = 10000;   // come su MSN: niente raffiche di trilli
+const msgTrilloIcon = (s = 16) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="${s}" height="${s}"><path d="m2 8 2 2-2 2 2 2-2 2"/><path d="m22 8-2 2 2 2-2 2 2 2"/><rect width="8" height="14" x="8" y="5" rx="1"/></svg>`;
+
 const Messages = {
   _list: [],
   loaded: false,
@@ -93,10 +97,11 @@ const Messages = {
   },
 
   // Un messaggio per ogni destinatario
-  async send(destinatari, testo, riferimento, ricordaIl) {
+  async send(destinatari, testo, riferimento, ricordaIl, trillo = false) {
     const rows = destinatari.map(d => ({
       mittente: this._me(), destinatario: d, testo: testo.trim(),
       riferimento: riferimento || null, ricorda_il: ricordaIl || null,
+      ...(trillo ? { trillo: true } : {}),
     }));
     const { data, error } = await supabaseClient.from('messages').insert(rows).select();
     if (error) throw new Error(this.error?.notInstalled ? this.error.message : 'Impossibile inviare il messaggio');
@@ -104,6 +109,18 @@ const Messages = {
     data.forEach(m => { if (!this._list.some(x => x.id === m.id)) this._list.unshift(m); });
     data.filter(m => m.destinatario === this._me() && this._arrivato(m)).forEach(m => this._seen.add(m.id));
     refreshMessagesUi();
+  },
+
+  // Trillo: fa vibrare lo schermo di chi lo riceve (uno ogni 10 secondi per persona)
+  _ultimoTrillo: {},
+  async trillo(destinatari) {
+    const ora = Date.now();
+    const a = destinatari.filter(d => d !== this._me());
+    if (!a.length) throw new Error('Il trillo si manda a qualcun altro');
+    const presto = a.filter(d => ora - (this._ultimoTrillo[d] || 0) < MSG_TRILLO_PAUSA_MS);
+    if (presto.length) throw new Error(`Hai appena mandato un trillo a ${presto.join(', ')}: aspetta qualche secondo`);
+    await this.send(a, MSG_TRILLO_TESTO, null, null, true);
+    a.forEach(d => { this._ultimoTrillo[d] = ora; });
   },
 
   // Promemoria non ancora arrivato: il mittente può cambiare testo, ora, destinatario ed elemento
@@ -144,7 +161,7 @@ const Messages = {
     showMessageToast(m, da);
     if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
       try {
-        const n = new Notification(`${da} — T&C Factory`, { body: m.testo, tag: m.id });
+        const n = new Notification(`${da} — T&C Factory`, { body: m.trillo ? `${m.mittente} ti ha mandato un trillo` : m.testo, tag: m.id });
         n.onclick = () => { window.focus(); openMessagesPanel(); n.close(); };
       } catch {}
     }
@@ -383,10 +400,12 @@ function renderMessagesPanel() {
           <strong>${ricevuti ? escapeHtml(m.mittente) : m.destinatario === me ? 'A te' : `A ${escapeHtml(m.destinatario)}`}</strong>
           <span>${msgWhen(m.created_at)}${!ricevuti && m.letto_at && m.destinatario !== me ? ' · letto' : ''}</span>
         </div>
-        <div class="msg-item-text">${escapeHtml(m.testo)}</div>
+        ${m.trillo ? `<div class="msg-item-text trillo">${msgTrilloIcon(15)} ${ricevuti ? 'Ti ha mandato un trillo' : 'Hai mandato un trillo'}</div>`
+          : `<div class="msg-item-text">${escapeHtml(m.testo)}</div>`}
         ${m.riferimento ? MsgRef.chip(m.riferimento, `MsgRef.open(Messages._list.find(x=>x.id==='${m.id}').riferimento)`) : ''}
         <div class="msg-item-actions">
-          ${ricevuti && m.mittente !== me ? `<button type="button" class="btn btn-ghost btn-sm" onclick="replyToMessage('${m.id}')">Rispondi</button>` : ''}
+          ${ricevuti && m.mittente !== me ? `<button type="button" class="btn btn-ghost btn-sm" onclick="sendTrillo(['${escapeHtml(m.mittente)}'])">${msgTrilloIcon(13)} Trillo</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="replyToMessage('${m.id}')">Rispondi</button>` : ''}
           <button type="button" class="btn btn-ghost btn-sm" onclick="deleteMessageConfirm('${m.id}')">Elimina</button>
         </div>
       </li>`;
@@ -512,6 +531,33 @@ const MsgSound = {
     if (!this._ctx) this._ctx = new AC();
     if (this._ctx.state === 'suspended') this._ctx.resume().catch(() => {});
   },
+  // Trillo: ronzio basso che vibra, come un telefono sul tavolo
+  playTrillo() {
+    try {
+      this.unlock();
+      const ctx = this._ctx;
+      if (!ctx || ctx.state !== 'running') return;
+      const t0 = ctx.currentTime + 0.02;
+      [0, 0.22, 0.44].forEach(delay => {
+        const t = t0 + delay;
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(0.22, t + 0.02);
+        gain.gain.setValueAtTime(0.22, t + 0.14);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.19);
+        gain.connect(ctx.destination);
+        const osc = ctx.createOscillator();
+        osc.type = 'sawtooth';
+        osc.frequency.value = 140;
+        // Tremolo veloce: il "brrr" della vibrazione
+        const lfo = ctx.createOscillator(), lfoGain = ctx.createGain();
+        lfo.frequency.value = 32; lfoGain.gain.value = 60;
+        lfo.connect(lfoGain).connect(osc.frequency);
+        osc.connect(gain);
+        [osc, lfo].forEach(o => { o.start(t); o.stop(t + 0.2); });
+      });
+    } catch {}
+  },
   // Due note di campanello (Mi6 → La6), morbide
   play() {
     try {
@@ -546,11 +592,11 @@ const MsgSound = {
 // Titolo della scheda che lampeggia finché la pagina non torna in primo piano
 const MsgTitleBlink = {
   _timer: null, _orig: null,
-  start(da) {
+  start(da, trillo) {
     if (!document.hidden || this._timer) return;
     this._orig = document.title;
     let on = false;
-    this._timer = setInterval(() => { on = !on; document.title = on ? `💬 Messaggio da ${da}` : this._orig; }, 1000);
+    this._timer = setInterval(() => { on = !on; document.title = on ? (trillo ? `📳 Trillo da ${da}` : `💬 Messaggio da ${da}`) : this._orig; }, 1000);
     const stop = () => { if (document.hidden) return; this.stop(); document.removeEventListener('visibilitychange', stop); };
     document.addEventListener('visibilitychange', stop);
   },
@@ -568,22 +614,23 @@ function showMessageToast(m, da) {
   }
   const toSelf = m.mittente === Messages._me();
   const iniziale = escapeHtml((da || '?').trim().charAt(0).toUpperCase());
-  const testo = m.testo.length > 220 ? m.testo.slice(0, 220) + '…' : m.testo;
+  const testo = m.trillo ? 'Ti ha mandato un trillo!' : m.testo.length > 220 ? m.testo.slice(0, 220) + '…' : m.testo;
   const card = document.createElement('div');
   card.className = 'msg-alert';
   card.setAttribute('role', 'alertdialog');
   card.setAttribute('aria-label', `${m.ricorda_il ? da : 'Nuovo messaggio da ' + da}`);
   card.innerHTML = `
     <div class="msg-alert-ring" aria-hidden="true"></div>
-    <div class="msg-alert-avatar" aria-hidden="true">${m.ricorda_il ? Icons.clock(22) : iniziale}<span class="msg-alert-bell">${Icons.messageCircle(13)}</span></div>
+    <div class="msg-alert-avatar" aria-hidden="true">${m.ricorda_il ? Icons.clock(22) : iniziale}<span class="msg-alert-bell">${m.trillo ? msgTrilloIcon(13) : Icons.messageCircle(13)}</span></div>
     <div class="msg-alert-body">
-      <div class="msg-alert-kicker">${m.ricorda_il ? 'Promemoria' : 'Nuovo messaggio'}</div>
+      <div class="msg-alert-kicker">${m.ricorda_il ? 'Promemoria' : m.trillo ? 'Trillo!' : 'Nuovo messaggio'}</div>
       <strong class="msg-alert-from">${escapeHtml(da)}</strong>
       <div class="msg-alert-text">${escapeHtml(testo)}</div>
       ${m.riferimento ? `<div class="msg-alert-ref">${MsgRef.chip(m.riferimento, 'void 0')}</div>` : ''}
       <div class="msg-alert-actions">
         <button type="button" class="btn btn-primary btn-sm" data-act="open">Apri</button>
         ${toSelf ? '' : '<button type="button" class="btn btn-secondary btn-sm" data-act="reply">Rispondi</button>'}
+        ${m.trillo && !toSelf ? `<button type="button" class="btn btn-secondary btn-sm" data-act="trillo">${msgTrilloIcon(13)} Trillo</button>` : ''}
       </div>
     </div>
     <button type="button" class="msg-alert-close" data-act="close" aria-label="Chiudi">${Icons.x(16)}</button>
@@ -601,6 +648,7 @@ function showMessageToast(m, da) {
     if (act === 'close') return;
     Messages.markRead([m.id]).catch(() => {});
     if (act === 'reply') replyToMessage(m.id);
+    else if (act === 'trillo') sendTrillo([m.mittente]);
     else if (act === 'ref') MsgRef.open(m.riferimento);
     else openMessagesPanel(m.ricorda_il ? 'promemoria' : 'ricevuti');
   });
@@ -614,14 +662,37 @@ function showMessageToast(m, da) {
   // Al massimo tre avvisi insieme
   [...stack.children].slice(3).forEach(c => c.remove());
 
-  MsgSound.play();
-  MsgTitleBlink.start(da);
-  if (navigator.vibrate) try { navigator.vibrate([120, 60, 120]); } catch {}
+  if (m.trillo) msgTrilloShake();
+  else MsgSound.play();
+  MsgTitleBlink.start(da, m.trillo);
+  if (navigator.vibrate) try { navigator.vibrate(m.trillo ? [200, 60, 200, 60, 200] : [120, 60, 120]); } catch {}
   // Il pulsante chat "suona" anche lui (dopo che la barra si è aggiornata col contatore)
   setTimeout(() => document.querySelectorAll('.sidebar-msg-btn, .more-msg-btn').forEach(b => {
     b.classList.add('msg-ringing');
     setTimeout(() => b.classList.remove('msg-ringing'), 2200);
   }), 60);
+}
+
+// Lo schermo vibra (se la scheda è in secondo piano, appena si torna)
+function msgTrilloShake() {
+  if (document.hidden) {
+    const dopo = () => { if (document.hidden) return; document.removeEventListener('visibilitychange', dopo); msgTrilloShake(); };
+    document.addEventListener('visibilitychange', dopo);
+    return;
+  }
+  MsgSound.playTrillo();
+  const el = document.querySelector('.app-shell') || document.body;
+  el.classList.remove('msg-trillo-shake');
+  void el.offsetWidth;
+  el.classList.add('msg-trillo-shake');
+  setTimeout(() => el.classList.remove('msg-trillo-shake'), 700);
+}
+
+async function sendTrillo(destinatari) {
+  try {
+    await Messages.trillo(destinatari);
+    showToast(`Trillo mandato a ${destinatari.filter(d => d !== TCAuth.getNickname()).join(', ')}`);
+  } catch (e) { showToast(e.message, 'error'); }
 }
 
 // ─────────────────────────────────────────────
@@ -716,6 +787,8 @@ function renderMessageComposer() {
             min="${msgLocalInput(msgRound10(new Date()))}" onchange="msgSetWhen(this)">
         </div>` : ''}
         <div style="display:flex;justify-content:flex-end;gap:8px;">
+          ${d.promemoria ? '' : `<button type="button" class="btn btn-secondary" style="margin-right:auto;" onclick="trilloFromComposer()"
+            title="Fa vibrare lo schermo dei destinatari">${msgTrilloIcon(15)} Trillo</button>`}
           <button type="button" class="btn btn-secondary" onclick="closeModal('msg-compose-modal')${d.editId ? ";openMessagesPanel('promemoria')" : ''}">Annulla</button>
           <button type="submit" class="btn btn-primary" id="mc-send">${d.editId ? 'Salva' : d.promemoria ? 'Programma' : 'Invia'}</button>
         </div>
@@ -730,6 +803,13 @@ function toggleMessageTo(u) {
   if (_msgDraft.editId) _msgDraft.destinatari = new Set([u]);
   else if (_msgDraft.destinatari.has(u)) _msgDraft.destinatari.delete(u); else _msgDraft.destinatari.add(u);
   renderMessageComposer();
+}
+
+// Il trillo non chiude la finestra: si può ancora scrivere il messaggio
+async function trilloFromComposer() {
+  const a = [..._msgDraft.destinatari].filter(u => u !== TCAuth.getNickname());
+  if (!a.length) { showToast('Scegli a chi mandare il trillo', 'error'); return; }
+  await sendTrillo(a);
 }
 
 async function submitMessageComposer() {

@@ -78,3 +78,6 @@ begin
     alter publication supabase_realtime add table messages;
   end if;
 end $$;
+
+-- Trillo (come su MSN): messaggio senza testo che fa vibrare lo schermo di chi lo riceve
+alter table messages add column if not exists trillo boolean not null default false;
